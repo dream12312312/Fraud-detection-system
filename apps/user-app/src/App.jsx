@@ -1,243 +1,786 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
+import { api, saveSession, clearSession, verifySession, setAccessToken, setSessionExpiredHandler, useNow } from './lib.js';
+// note: the component-local useFlashSafe below replaces lib.js's useFlash so the
+// flash timer is cancellable (avoids an older flash wiping a newer one)
 
-const API = '';
-let socket = null;
+/* ---------- helpers ---------- */
 
-function useAuth() {
-  const [token, setToken] = useState(localStorage.getItem('token') || '');
-  const [user, setUser] = useState(JSON.parse(localStorage.getItem('user') || 'null'));
-  return { token, setToken, user, setUser };
+const money = (n) => (n == null ? '—' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+const timeAgo = (iso) => {
+  if (!iso) return '';
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return new Date(iso).toLocaleDateString();
+};
+
+function Flash({ flash, onClose }) {
+  if (!flash) return null;
+  const icons = { ok: '✅', warn: '⚠️', error: '⛔', info: 'ℹ️', fraud: '🚨' };
+  return (
+    <div className={`flash ${flash.type}`} role="alert">
+      <span>{icons[flash.type] || 'ℹ️'}</span>
+      <div style={{ flex: 1 }}>{flash.text}</div>
+      <button className="btn ghost sm" onClick={onClose} aria-label="Dismiss">✕</button>
+    </div>
+  );
 }
 
-async function api(path, { method = 'GET', body, token } = {}) {
-  const res = await fetch(`/api/v1${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data;
+function Empty({ icon, title, text }) {
+  return (
+    <div className="empty">
+      <div className="icon">{icon}</div>
+      <h4>{title}</h4>
+      <p>{text}</p>
+    </div>
+  );
 }
 
-function Auth({ onAuth }) {
+const RiskBadge = ({ level, prob }) => {
+  if (!level && prob == null) return <span style={{ color: 'var(--text-faint)' }}>—</span>;
+  const cls = level === 'HIGH' ? 'HIGH' : level === 'MEDIUM' ? 'MEDIUM' : 'LOW';
+  return <span className={`badge ${cls}`}>{level || 'LOW'} {prob != null ? `· ${Math.round(prob * 100)}%` : ''}</span>;
+};
+
+/* ---------- auth screens ---------- */
+
+function AuthScreen({ onAuth }) {
   const [mode, setMode] = useState('login');
-  const [form, setForm] = useState({ email: '', password: '', fullName: '' });
+  const [form, setForm] = useState({ fullName: '', email: '', password: '' });
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [pendingEmail, setPendingEmail] = useState(null);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError('');
+    try {
+      if (mode === 'register') {
+        const r = await api('/auth/register', { method: 'POST', body: form });
+        setPendingEmail(r.email);
+        setMode('pending');
+      } else {
+        const login = await api('/auth/login', { method: 'POST', body: { email: form.email, password: form.password } });
+        saveSession(login);
+        onAuth(login.user);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (mode === 'pending') {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card">
+          <div className="logo-big">🛡️</div>
+          <h1>Almost there</h1>
+          <p className="sub">Your account for <b>{pendingEmail}</b> is created and is awaiting administrator approval.</p>
+          <div className="pending-box">
+            <div className="icon">⏳</div>
+            <ul className="pending-steps">
+              <li className="done">Registration complete</li>
+              <li className="done">Account created with a $5,000 demo balance</li>
+              <li className="current">Waiting for admin approval</li>
+              <li>Sign in and start banking</li>
+            </ul>
+            <p style={{ color: 'var(--text-faint)', fontSize: 13 }}>You will be able to sign in once your account is approved.</p>
+          </div>
+          <button className="btn ghost auth-switch" onClick={() => { setMode('login'); setError(''); }}>← Back to sign in</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-card">
+        <div className="logo-big">🛡️</div>
+        <h1>SentinelPay</h1>
+        <p className="sub">{mode === 'login' ? 'Sign in to your online banking' : 'Open a demo account in seconds'}</p>
+        <form onSubmit={submit}>
+          {mode === 'register' && (
+            <div className="field">
+              <label>Full name</label>
+              <input required placeholder="Ada Lovelace" value={form.fullName} onChange={set('fullName')} />
+            </div>
+          )}
+          <div className="field">
+            <label>Email</label>
+            <input required type="email" placeholder="you@example.com" value={form.email} onChange={set('email')} />
+          </div>
+          <div className="field">
+            <label>Password</label>
+            <input required type="password" placeholder={mode === 'register' ? 'At least 8 characters' : '•'} value={form.password} onChange={set('password')} />
+            {mode === 'register' && <div className="hint">Demo accounts start with a $5,000 balance pending approval.</div>}
+          </div>
+          {error && <div className="flash error" style={{ marginBottom: 14 }}><span>⛔</span><div>{error}</div></div>}
+          <button className="btn" style={{ width: '100%' }} disabled={busy} type="submit">
+            {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
+          </button>
+        </form>
+        <button className="btn ghost auth-switch" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>
+          {mode === 'login' ? "New to SentinelPay? Create an account" : 'Already have an account? Sign in'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- review (step-up) modal ---------- */
+
+function ReviewModal({ review, onDecision, onClose, busy }) {
+  if (!review) return null;
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Confirm this payment</h3>
+        <p style={{ color: 'var(--text-dim)', fontSize: 13.5, margin: '4px 0 14px' }}>
+          Our fraud engine flagged this transaction for verification. Please review the details.
+        </p>
+        <div className="review-row"><span className="k">Transaction</span><b>{review.txId}</b></div>
+        <div className="review-row"><span className="k">To</span><b>{review.to}</b></div>
+        <div className="review-row"><span className="k">Amount</span><b>{money(review.amount)}</b></div>
+        <div className="review-row">
+          <span className="k">Risk</span>
+          <RiskBadge level={review.riskLevel} prob={review.fraudProbability} />
+        </div>
+        {review.reasons?.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div className="section-label" style={{ margin: '0 0 8px' }}>Why we flagged it</div>
+            {review.reasons.map((r) => (
+              <div key={r} style={{ fontSize: 13, color: 'var(--text-dim)', padding: '4px 0' }}>• {r.replaceAll('_', ' ').toLowerCase()}</div>
+            ))}
+          </div>
+        )}
+        <div className="actions">
+          <button className="btn ghost" disabled={busy} onClick={onClose}>Not now</button>
+          <button className="btn danger" disabled={busy} onClick={() => onDecision('report')}>Report fraud</button>
+          <button className="btn success" disabled={busy} onClick={() => onDecision('confirm')}>Confirm payment</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- dashboard ---------- */
+
+const TABS = [
+  { id: 'overview', ico: '🏠', label: 'Overview', hint: 'Balances and recent activity' },
+  { id: 'transfer', ico: '💸', label: 'Transfer', hint: 'Send money to a payee' },
+  { id: 'transactions', ico: '🧾', label: 'Transactions', hint: 'Full history with fraud decisions' },
+  { id: 'beneficiaries', ico: '👥', label: 'Beneficiaries', hint: 'Saved payees for faster transfers' },
+  { id: 'notifications', ico: '🔔', label: 'Alerts', hint: 'Security and account notifications' }
+];
+
+function SideNav({ user, tab, setTab, unread, challenged, onLogout }) {
+  const initials = (user_) => (user_.fullName || user_.email).split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+  return (
+    <nav className="side-nav">
+      <div className="nav-label">Banking</div>
+      {TABS.map((t) => (
+        <button
+          key={t.id}
+          className={`nav-item ${tab === t.id ? 'active' : ''}`}
+          onClick={() => setTab(t.id)}
+          title={t.hint}
+          aria-label={`${t.label} — ${t.hint}`}
+        >
+          <span className="nav-ico">{t.ico}</span>{t.label}
+          {t.id === 'notifications' && unread > 0 && <span className="nav-count" title={`${unread} unread notifications`}>{unread}</span>}
+          {t.id === 'transactions' && challenged && <span className="nav-dot" title="A transaction needs your confirmation" />}
+        </button>
+      ))}
+      <div className="side-foot">
+        <div className="side-user">
+          <div className="avatar" aria-hidden="true">{initials(user)}</div>
+          <div className="who">
+            <div className="name">{user.fullName || user.email}</div>
+            <div className="mail">{user.email}</div>
+          </div>
+        </div>
+        <button className="btn ghost sm" style={{ width: '100%', marginTop: 8 }} onClick={onLogout}>Sign out</button>
+      </div>
+    </nav>
+  );
+}
+
+export default function App() {
+  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user') || 'null'));
+  const [booting, setBooting] = useState(true);
+
+  // restore + verify session on load
+  useEffect(() => {
+    const stored = localStorage.getItem('token');
+    if (!stored) { setBooting(false); return; }
+    setAccessToken(stored);
+    verifySession().then((me) => {
+      if (me) {
+        localStorage.setItem('user', JSON.stringify(me));
+        setUser(me);
+      } else {
+        clearSession();
+        setUser(null);
+      }
+      setBooting(false);
+    });
+  }, []);
+
+  if (booting) {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card" style={{ textAlign: 'center' }}>
+          <div className="logo-big">🛡️</div>
+          <p style={{ color: 'var(--text-dim)' }}>Loading SentinelPay…</p>
+        </div>
+      </div>
+    );
+  }
+  if (!user) return <AuthScreen onAuth={setUser} />;
+  // An admin-issued temporary password MUST be changed before banking.
+  if (user.mustChangePassword) {
+    return (
+      <ChangePasswordScreen
+        user={user}
+        onDone={(updated) => { localStorage.setItem('user', JSON.stringify(updated)); setUser(updated); }}
+        onLogout={() => { clearSession(); setUser(null); }}
+      />
+    );
+  }
+  return <Shell user={user} onUser={setUser} onLogout={() => { clearSession(); setUser(null); }} />;
+}
+
+/* ---------- forced temporary-password change ---------- */
+
+function ChangePasswordScreen({ user, onDone, onLogout }) {
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const submit = async (e) => {
     e.preventDefault();
     setError('');
+    if (form.newPassword !== form.confirm) { setError('The two new passwords do not match.'); return; }
+    setBusy(true);
     try {
-      if (mode === 'register') {
-        await api('/auth/register', { method: 'POST', body: form });
-      }
-      const login = await api('/auth/login', { method: 'POST', body: { email: form.email, password: form.password } });
-      localStorage.setItem('token', login.accessToken);
-      localStorage.setItem('user', JSON.stringify(login.user));
-      onAuth(login);
-    } catch (err) {
-      setError(err.message);
-    }
+      const r = await api('/auth/change-password', { method: 'POST', body: { currentPassword: form.currentPassword, newPassword: form.newPassword } });
+      onDone({ ...user, mustChangePassword: false });
+      alert(r.message || 'Password updated.');
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
   };
 
   return (
-    <div style={{ maxWidth: 380, margin: '80px auto', background: '#1e293b', padding: 32, borderRadius: 12 }}>
-      <h1 style={{ marginBottom: 8 }}>🛡️ SentinelPay</h1>
-      <p style={{ color: '#94a3b8', marginBottom: 24 }}>Real-time fraud-protected banking</p>
-      <form onSubmit={submit}>
-        {mode === 'register' && (
-          <input placeholder="Full name" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })}
-            style={inp} required />
-        )}
-        <input placeholder="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-          style={inp} required />
-        <input placeholder="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-          style={inp} required minLength={8} />
-        {error && <p style={{ color: '#f871', margin: '8px 0' }}>{error}</p>}
-        <button style={btn} type="submit">{mode === 'login' ? 'Login' : 'Create account'}</button>
-      </form>
-      <button style={{ ...btn, background: 'transparent', border: '1px solid #334155', marginTop: 8 }}
-        onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-        {mode === 'login' ? 'Need an account? Register' : 'Have an account? Login'}
-      </button>
+    <div className="auth-wrap">
+      <div className="auth-card">
+        <div className="logo-big">🔐</div>
+        <h1>Set your own password</h1>
+        <p className="sub">You are signed in with a <b>temporary password</b> created by an administrator. Choose your own password now — you cannot use SentinelPay until you do.</p>
+        <form onSubmit={submit}>
+          <div className="field">
+            <label>Temporary password</label>
+            <input required type="password" value={form.currentPassword} onChange={set('currentPassword')} />
+          </div>
+          <div className="field">
+            <label>New password</label>
+            <input required type="password" minLength={8} placeholder="At least 8 characters" value={form.newPassword} onChange={set('newPassword')} />
+          </div>
+          <div className="field">
+            <label>Confirm new password</label>
+            <input required type="password" minLength={8} value={form.confirm} onChange={set('confirm')} />
+          </div>
+          {error && <div className="flash error" style={{ marginBottom: 14 }}><span>⛔</span><div>{error}</div></div>}
+          <button className="btn" style={{ width: '100%' }} disabled={busy} type="submit">{busy ? 'Saving…' : 'Save new password'}</button>
+        </form>
+        <button className="btn ghost auth-switch" onClick={onLogout}>Sign out instead</button>
+      </div>
     </div>
   );
 }
 
-const inp = { width: '100%', padding: 10, margin: '6px 0', borderRadius: 8, border: '1px solid #334155', background: '#0f172a', color: '#e2e8f0' };
-const btn = { width: '100%', padding: 10, marginTop: 8, borderRadius: 8, border: 'none', background: '#2563eb', color: 'white', cursor: 'pointer', fontWeight: 600 };
-const card = { background: '#1e293b', borderRadius: 12, padding: 20, marginBottom: 16 };
-const row = { display: 'flex', gap: 16, flexWrap: 'wrap' };
+function Shell({ user, onUser, onLogout }) {
+  const [tab, setTab] = useState('overview');
+  const [flash, flashMsg, clearFlash] = useFlashSafe();
+  const [review, setReview] = useState(null);
+  const [data, setData] = useState({ accounts: [], txns: [], notifs: [], beneficiaries: [] });
+  const [loading, setLoading] = useState(true);
+  const socketRef = useRef(null);
+  const now = useNow(30000); // re-render clock for "x ago" labels
 
-function Dashboard({ token, user, onLogout }) {
-  const [accounts, setAccounts] = useState([]);
-  const [txns, setTxns] = useState([]);
-  const [beneficiaries, setBeneficiaries] = useState([]);
-  const [notifications, setNotifications] = useState([]);
-  const [transfer, setTransfer] = useState({ toAccount: '', amount: '', merchant: '', country: 'US' });
-  const [message, setMessage] = useState(null);
-
-  const refresh = async () => {
+  const load = useCallback(async () => {
     try {
-      const [acc, tx, ben, notif] = await Promise.all([
-        api('/accounts', { token }), api('/transactions', { token }),
-        api('/beneficiaries', { token }), api('/notifications', { token })
+      const [accounts, txns, notifs, beneficiaries] = await Promise.all([
+        api('/accounts'), api('/transactions'), api('/notifications'), api('/beneficiaries')
       ]);
-      setAccounts(acc); setTxns(tx); setBeneficiaries(ben); setNotifications(notif);
-    } catch (err) { setMessage({ type: 'error', text: err.message }); }
-  };
-
-  useEffect(() => {
-    refresh();
-    socket = io('/', { withCredentials: true });
-    socket.emit('join', { userId: user.id, role: user.role });
-    socket.on('notification:new', (n) => {
-      setNotifications((prev) => [n, ...prev]);
-      setMessage({ type: n.type === 'FRAUD_ALERT' ? 'fraud' : 'info', text: `${n.title}: ${n.body}` });
-      recordTransaction();
-    });
-    return () => socket.disconnect();
+      setData({ accounts, txns, notifs, beneficiaries });
+    } catch (err) {
+      flashMsg('error', err.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const recordTransaction = () => { api('/transactions', { token }).then(setTxns).catch(() => {}); };
+  useEffect(() => { load(); }, [load]);
 
-  const submitTransfer = async (e) => {
-    e.preventDefault();
-    setMessage(null);
+  // live updates over socket.io
+  useEffect(() => {
+    setSessionExpiredHandler(() => { clearSession(); onLogout(); });
+    const socket = io('/', { withCredentials: true });
+    socketRef.current = socket;
+    socket.emit('join', { userId: user.id });
+    socket.on('transaction:update', () => { load(); });
+    socket.on('notification:new', (n) => {
+      setData((d) => ({ ...d, notifs: [n, ...d.notifs].slice(0, 50) }));
+      const kind = n.type === 'FRAUD_ALERT' ? 'fraud' : n.type === 'WARNING' ? 'warn' : n.type === 'SUCCESS' ? 'ok' : 'info';
+      flashMsg(kind, <span><b>{n.title}</b>{n.body ? ` — ${n.body}` : ''}</span>, 8000);
+      if (n.type === 'WARNING') load(); // a challenge may have appeared
+    });
+    return () => socket.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.id]);
+
+  const reviewing = data.txns.find((t) => t.status === 'CHALLENGED');
+
+  const decide = async (kind) => {
+    if (!reviewing) return;
     try {
-      const res = await api('/transfer', { method: 'POST', token, body: { ...transfer, amount: Number(transfer.amount) } });
-      if (res.status === 'BLOCKED') setMessage({ type: 'fraud', text: `Your transaction was blocked because unusual activity was detected. (${res.reasons?.join(', ')})` });
-      else if (res.status === 'CHALLENGED') setMessage({ type: 'warn', text: 'Please confirm this transaction below.' });
-      else setMessage({ type: 'ok', text: `Transfer completed (${res.txId})` });
-      setTransfer({ toAccount: '', amount: '', merchant: '', country: 'US' });
-      refresh();
-    } catch (err) { setMessage({ type: 'error', text: err.message }); }
+      await api(`/transactions/${reviewing.txId}/${kind}`, { method: 'POST' });
+      setReview(null);
+      flashMsg(kind === 'confirm' ? 'ok' : 'info', kind === 'confirm' ? `Payment ${reviewing.txId} confirmed and sent.` : `Transaction ${reviewing.txId} reported as fraud. Our team will contact you.`);
+      await load();
+    } catch (err) {
+      flashMsg('error', err.message);
+    }
   };
 
-  const confirmTx = async (txId) => { await api(`/transactions/${txId}/confirm`, { method: 'POST', token }); refresh(); };
-  const reportTx = async (txId) => { await api(`/transactions/${txId}/report`, { method: 'POST', token }); refresh(); };
-  const addBeneficiary = async (e) => {
-    e.preventDefault();
-    const f = new FormData(e.target);
-    await api('/beneficiaries', { method: 'POST', token, body: Object.fromEntries(f) });
-    refresh();
-  };
+  const checking = data.accounts.find((a) => a.type === 'CHECKING');
+  const savings = data.accounts.find((a) => a.type === 'SAVINGS');
+  const unread = data.notifs.filter((n) => !n.read).length;
 
-  const total = accounts.reduce((s, a) => s + a.balance, 0);
-  const msgStyle = {
-    error: '#f871', fraud: '#f871', warn: '#fbbf24', ok: '#4ade80', info: '#60a5fa'
-  }[message?.type] || '#60a5fa';
+  if (reviewing && !review) setReview(reviewing);
 
   return (
-    <div>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1>🛡️ SentinelPay</h1>
-        <div>
-          <span style={{ marginRight: 16, color: '#94a3b8' }}>{user.fullName} ({user.email})</span>
-          <button style={{ ...btn, width: 'auto', padding: '8px 16px' }} onClick={() => { localStorage.clear(); onLogout(); }}>Logout</button>
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="topbar-brand"><span className="logo">🛡️</span> SentinelPay</div>
+        <div className="topbar-user">
+          <span className="status-dot ok" title="API connected" />
+          <span>Signed in as <b>{user.fullName || user.email}</b></span>
+          <button className="btn ghost sm" onClick={onLogout}>Sign out</button>
         </div>
       </header>
 
-      {message && <div style={{ background: '#1e293b', borderLeft: `4px solid ${msgStyle}`, padding: 14, borderRadius: 8, marginBottom: 16 }}>
-        {message.text}
-      </div>}
+      <div className="layout">
+        <SideNav user={user} tab={tab} setTab={setTab} unread={unread} challenged={Boolean(reviewing)} onLogout={onLogout} />
+        <main className="main">
+          <Flash flash={flash} onClose={clearFlash} />
 
-      <div style={row}>
-        <div style={{ ...card, flex: 1 }}>
-          <h3>Accounts</h3>
-          {accounts.map((a) => (
-            <p key={a._id} style={{ margin: '8px 0' }}>
-              {a.accountNumber} · {a.type} — <b style={{ color: '#4ade80' }}>${a.balance.toFixed(2)}</b>
-              {a.heldAmount > 0 && <span style={{ color: '#fbbf24' }}> (${a.heldAmount.toFixed(2)} on hold)</span>}
-            </p>
-          ))}
-          <p style={{ marginTop: 12, color: '#94a3b8' }}>Total available: <b style={{ color: 'white' }}>${total.toFixed(2)}</b></p>
-        </div>
+          {tab === 'overview' && (
+            <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} notifs={data.notifs} loading={loading} go={setTab} />
+          )}
+          {tab === 'transfer' && <TransferTab data={data} flashMsg={flashMsg} reload={load} />}
+          {tab === 'transactions' && <TxnTab txns={data.txns} loading={loading} />}
+          {tab === 'beneficiaries' && <BeneficiaryTab data={data} flashMsg={flashMsg} reload={load} />}
+          {tab === 'notifications' && <NotifTab notifs={data.notifs} reload={load} now={now} />}
+        </main>
+      </div>
 
-        <div style={{ ...card, flex: 2 }}>
-          <h3>New transfer / payment</h3>
-          <form onSubmit={submitTransfer} style={row}>
-            <input style={{ ...inp, flex: 1 }} placeholder="To account" required value={transfer.toAccount}
-              onChange={(e) => setTransfer({ ...transfer, toAccount: e.target.value })} />
-            <input style={{ ...inp, flex: 1 }} placeholder="Amount" type="number" step="0.01" min="0.01" required value={transfer.amount}
-              onChange={(e) => setTransfer({ ...transfer, amount: e.target.value })} />
-            <input style={{ ...inp, flex: 1 }} placeholder="Merchant (optional)" value={transfer.merchant}
-              onChange={(e) => setTransfer({ ...transfer, merchant: e.target.value })} />
-            <select style={inp} value={transfer.country} onChange={(e) => setTransfer({ ...transfer, country: e.target.value })}>
-              {['US', 'CA', 'GB', 'FR', 'BR', 'NG', 'RU'].map((c) => <option key={c}>{c}</option>)}
-            </select>
-            <button style={btn} type="submit">Send</button>
-          </form>
+      <ReviewModal review={review} busy={false} onDecision={decide} onClose={() => setReview(null)} />
+    </div>
+  );
+}
 
-          <h3 style={{ marginTop: 20 }}>Add beneficiary</h3>
-          <form onSubmit={addBeneficiary} style={row}>
-            <input style={{ ...inp, flex: 1 }} name="nickname" placeholder="Nickname" required />
-            <input style={{ ...inp, flex: 1 }} name="accountNumber" placeholder="Account number" required />
-            <input style={{ ...inp, flex: 1 }} name="bankName" placeholder="Bank (optional)" />
-            <button style={btn} type="submit">Add</button>
-          </form>
-          <div style={{ marginTop: 12 }}>
-            {beneficiaries.map((b) => <span key={b._id} style={{ background: '#0f172a', borderRadius: 6, padding: '4px 10px', marginRight: 8, fontSize: 13 }}>{b.nickname} · {b.accountNumber}</span>)}
+/* useFlash with stable identity (re-export wrapper to keep deps tidy) */
+function useFlashSafe() {
+  const [flash, setFlash] = useState(null);
+  const timer = useRef();
+  const show = useCallback((type, text, ms = 6000) => {
+    const key = Date.now();
+    setFlash({ type, text, key });
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setFlash((f) => (f && f.key === key ? null : f)), ms);
+  }, []);
+  return [flash, show, () => setFlash(null)];
+}
+
+/* ---------- overview ---------- */
+
+function OverviewTab({ user, checking, savings, txns, notifs, loading, go }) {
+  const unread = notifs.filter((n) => !n.read).length;
+  const challenged = txns.find((t) => t.status === 'CHALLENGED');
+  const blocked = txns.filter((t) => t.status === 'BLOCKED').length;
+  const avail = checking ? checking.balance - checking.heldAmount : 0;
+
+  // 7-day spending chart data (one bar per day, last 7 days)
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const label = d.toLocaleDateString('en-US', { weekday: 'short' });
+    const key = d.toDateString();
+    const total = txns.filter((t) => new Date(t.createdAt).toDateString() === key)
+      .reduce((s, t) => s + Number(t.amount || 0), 0);
+    days.push({ label, total });
+  }
+  const maxDay = Math.max(...days.map((d) => d.total), 1);
+
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
+  return (
+    <>
+      <div className="hero">
+        <div className="greet">{greet}, {user.fullName || user.email.split('@')[0]} 👋</div>
+        <div className="hero-row">
+          <div>
+            <div className="big-balance">{loading ? '…' : money(avail)}</div>
+            <div className="hero-meta">
+              Available to spend · {checking?.accountNumber || '—'}
+              {checking?.heldAmount > 0 ? ` · ${money(checking.heldAmount)} on hold` : ''}
+            </div>
+          </div>
+          <div className="quick-actions">
+            <button className="btn" onClick={() => go('transfer')} title="Send money to a payee or merchant">💸 Send money</button>
+            <button className="btn ghost" onClick={() => go('transactions')} title="See all transactions and their fraud decisions">🧾 Activity</button>
           </div>
         </div>
       </div>
 
-      <div style={row}>
-        <div style={{ ...card, flex: 2 }}>
-          <h3>Transactions</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-            <thead><tr style={{ color: '#94a3b8', textAlign: 'left' }}>
-              <th style={th}>ID</th><th style={th}>Type</th><th style={th}>Amount</th><th style={th}>Status</th><th style={th}>Risk</th><th style={th}>Actions</th>
-            </tr></thead>
-            <tbody>
-              {txns.map((t) => (
-                <tr key={t._id}>
-                  <td style={td}>{t.txId}</td>
-                  <td style={td}>{t.type}</td>
-                  <td style={td}>${t.amount.toFixed(2)}</td>
-                  <td style={td}><StatusBadge status={t.status} /></td>
-                  <td style={td}>{t.fraudProbability != null ? `${Math.round(t.fraudProbability * 100)}%` : '—'}</td>
-                  <td style={td}>
-                    {t.status === 'CHALLENGED' && (<>
-                      <button style={{ ...btn, width: 'auto', padding: '4px 10px', fontSize: 12, background: '#16a34a' }} onClick={() => confirmTx(t.txId)}>Confirm</button>
-                      <button style={{ ...btn, width: 'auto', padding: '4px 10px', fontSize: 12, background: '#dc2626', marginLeft: 6 }} onClick={() => reportTx(t.txId)}>Report fraud</button>
-                    </>)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="kpi-row" style={{ marginBottom: 18 }}>
+        <div className="kpi" title="Money in your checking account, including funds on hold"><div className="v">{loading ? '…' : money(checking?.balance)}</div><div className="l">💼 Checking balance</div></div>
+        <div className="kpi" title="Money reserved for transactions waiting on a fraud decision"><div className="v">{loading ? '…' : money(checking?.heldAmount || 0)}</div><div className="l">🔒 On hold</div></div>
+        <div className="kpi" title="Total number of transactions you have made"><div className="v">{txns.length}</div><div className="l">🧾 Transactions</div></div>
+        <div className="kpi" title="Transactions our fraud engine stopped"><div className="v" style={{ color: blocked ? 'var(--danger)' : undefined }}>{blocked}</div><div className="l">🚨 Blocked by fraud AI</div></div>
+        <div className="kpi" title="Unread security and account notifications"><div className="v" style={{ color: unread ? 'var(--warn)' : undefined }}>{unread}</div><div className="l">🔔 Unread alerts</div></div>
+      </div>
+
+      <div className="grid sidebar">
+        <div>
+          {challenged && (
+            <div className="flash warn" style={{ marginTop: 0 }}>
+              <span>⚠️</span>
+              <div style={{ flex: 1 }}>
+                <b>Action needed</b>
+                Transaction {challenged.txId} ({money(challenged.amount)}) is waiting for your confirmation.
+              </div>
+              <button className="btn sm success" onClick={() => go('transactions')}>Review</button>
+            </div>
+          )}
+
+          <div className="card" style={{ marginTop: challenged ? 18 : 0 }}>
+            <div className="card-title">
+              <h3><span className="ico">📊</span> Spending — last 7 days</h3>
+            </div>
+            {txns.length === 0
+              ? <Empty icon="📊" title="Nothing to chart yet" text="Once you make your first transfer or payment, your daily spending will appear here." />
+              : (
+                <div className="sparkbars">
+                  {days.map((d) => (
+                    <div key={d.label} className={`sparkbar ${d.total ? '' : 'zero'}`} title={`${d.label}: ${money(d.total)} spent`}>
+                      <span className="amt">{d.total ? money(d.total) : ''}</span>
+                      <div className="bar" style={{ height: `${Math.max((d.total / maxDay) * 100, 4)}%` }} />
+                      <span className="day">{d.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </div>
+
+          <div className="card">
+            <div className="card-title">
+              <h3><span className="ico">🧾</span> Recent transactions</h3>
+              <button className="btn ghost sm" onClick={() => go('transactions')}>View all</button>
+            </div>
+            {loading ? <p style={{ color: 'var(--text-dim)' }}>Loading…</p>
+              : txns.length === 0
+                ? <Empty icon="🧾" title="No transactions yet" text="You have no transactions yet. Start your first payment to see your activity here." />
+                : (
+                  <table className="data">
+                    <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {txns.slice(0, 6).map((t) => (
+                        <tr key={t._id}>
+                          <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{timeAgo(t.createdAt)}</td>
+                          <td>{t.merchant || 'Transfer'} <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>{t.txId}</span></td>
+                          <td className="amount">−{money(t.amount)}</td>
+                          <td><span className={`badge ${t.status}`}>{t.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+          </div>
         </div>
 
-        <div style={{ ...card, flex: 1 }}>
-          <h3>Security notifications</h3>
-          {notifications.length === 0 && <p style={{ color: '#94a3b8' }}>No notifications yet.</p>}
-          {notifications.map((n) => (
-            <div key={n._id} style={{ padding: '10px 0', borderBottom: '1px solid #334155' }}>
-              <b style={{ color: n.type === 'FRAUD_ALERT' ? '#f871' : n.type === 'WARNING' ? '#fbbf24' : '#4ade80' }}>{n.title}</b>
-              <p style={{ fontSize: 13, color: '#cbd5e1' }}>{n.body}</p>
-              <p style={{ fontSize: 11, color: '#64748b' }}>{new Date(n.createdAt).toLocaleString()}</p>
+        <div>
+          <div className="card">
+            <div className="card-title"><h3><span className="ico">🔔</span> Notifications</h3></div>
+            {notifs.length === 0
+              ? <Empty icon="🔔" title="All quiet" text="Account alerts will appear here." />
+              : notifs.slice(0, 5).map((n) => (
+                <div key={n._id} className={`notif ${n.read ? '' : 'unread'}`}>
+                  <div className="title">{n.title}</div>
+                  {n.body && <div className="body">{n.body}</div>}
+                  <div className="time">{timeAgo(n.createdAt)}</div>
+                </div>
+              ))}
+            {notifs.length > 0 && (
+              <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => go('notifications')}>
+                {unread > 0 ? `${unread} unread — open Alerts` : 'Open Alerts'}
+              </button>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-title"><h3><span className="ico">👤</span> Profile</h3></div>
+            <div style={{ fontSize: 14 }}>
+              <div className="review-row"><span className="k">Name</span><b>{user.fullName}</b></div>
+              <div className="review-row"><span className="k">Email</span><b>{user.email}</b></div>
+              <div className="review-row"><span className="k">Home country</span><b>{user.homeCountry || 'US'}</b></div>
             </div>
-          ))}
+            <div className="card-hint">Transfers to a country other than your home country are reviewed more strictly by the fraud engine.</div>
+          </div>
         </div>
+      </div>
+    </>
+  );
+}
+
+/* ---------- transfer ---------- */
+
+const COUNTRIES = ['US', 'GB', 'DE', 'FR', 'NG', 'IN', 'BR', 'CA'];
+
+function TransferTab({ data, flashMsg, reload }) {
+  const [form, setForm] = useState({ toAccount: '', amount: '', merchant: '', country: 'US' });
+  const [busy, setBusy] = useState(false);
+  const [last, setLast] = useState(null);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const res = await api('/transfer', { method: 'POST', body: { ...form, amount: Number(form.amount) } });
+      setLast(res);
+      if (res.status === 'CHALLENGED') {
+        flashMsg('warn', 'Your payment is being reviewed for security reasons. Please confirm it below to continue.');
+      } else if (res.status === 'BLOCKED') {
+        flashMsg('fraud', 'This transaction was blocked because suspicious activity was detected.', 10000);
+      } else if (res.status === 'COMPLETED') {
+        flashMsg('ok', `✅ Payment sent — ${money(res.amount || Number(form.amount))} · ${res.txId}.`);
+      } else {
+        flashMsg('info', `Payment ${res.txId} is ${res.status}.`);
+      }
+      setForm((f) => ({ ...f, amount: '', merchant: '' }));
+      await reload();
+    } catch (err) {
+      flashMsg('error', err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="grid sidebar">
+      <div className="card">
+        <div className="page-head" style={{ marginBottom: 14 }}>
+          <h2>Send money</h2>
+          <div className="sub">Please review your transaction details before confirming. Every payment is scored in real time by our fraud engine.</div>
+        </div>
+        <form onSubmit={submit}>
+          <div className="field">
+            <label>To account</label>
+            <select required value={form.toAccount} onChange={set('toAccount')}>
+              <option value="" disabled>Select a beneficiary…</option>
+              {data.beneficiaries.map((b) => (
+                <option key={b._id} value={b.accountNumber}>{b.nickname} · {b.accountNumber}{b.bankName ? ` (${b.bankName})` : ''}</option>
+              ))}
+            </select>
+            <div className="hint">Payments to unknown accounts are scored as higher risk.</div>
+          </div>
+          <div className="form-row">
+            <div className="field">
+              <label>Amount (USD)</label>
+              <input required type="number" min="0.01" step="0.01" placeholder="250.00" value={form.amount} onChange={set('amount')} />
+            </div>
+            <div className="field">
+              <label>Country</label>
+              <select value={form.country} onChange={set('country')}>
+                {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <label>Merchant / reference (optional)</label>
+            <input placeholder="e.g. Electric bill" value={form.merchant} onChange={set('merchant')} />
+            <div className="hint">Leave empty for a plain account-to-account transfer.</div>
+          </div>
+          <button className="btn" type="submit" disabled={busy}>{busy ? 'Processing…' : 'Send payment'}</button>
+        </form>
+      </div>
+
+      <div className="card">
+        <div className="card-title"><h3><span className="ico">🔍</span> Last payment</h3></div>
+        {!last
+          ? <p style={{ color: 'var(--text-dim)', fontSize: 13.5 }}>Your most recent result will show up here — including the fraud-engine decision, risk score and the reasons behind it.</p>
+          : (
+            <>
+              <div className="review-row"><span className="k">Transaction</span><b>{last.txId}</b></div>
+              <div className="review-row"><span className="k">Status</span><span className={`badge ${last.status}`}>{last.status}</span></div>
+              <div className="review-row"><span className="k">Decision</span><b>{last.decision || '—'}</b></div>
+              <div className="review-row"><span className="k">Risk</span><RiskBadge level={last.riskLevel} prob={last.fraudProbability} /></div>
+              <div className="review-row"><span className="k">Scored by</span><b>{last.source || '—'}</b></div>
+              {last.reasons?.length > 0 && (
+                <div className="card-hint">Reasons: {last.reasons.join(', ').replaceAll('_', ' ').toLowerCase()}</div>
+              )}
+            </>
+          )}
       </div>
     </div>
   );
 }
 
-const th = { padding: 8, borderBottom: '1px solid #334155' };
-const td = { padding: 8, borderBottom: '1px solid #1e293b' };
+/* ---------- transactions ---------- */
 
-function StatusBadge({ status }) {
-  const colors = { COMPLETED: '#4ade80', BLOCKED: '#f871', CHALLENGED: '#fbbf24', PENDING_RISK_CHECK: '#60a5fa', FAILED: '#94a3b8' };
-  return <span style={{ color: colors[status] || '#e2e8f0', fontWeight: 600, fontSize: 13 }}>{status}</span>;
+function TxnTab({ txns, loading }) {
+  if (loading) return <div className="card"><p style={{ color: 'var(--text-dim)' }}>Loading…</p></div>;
+  return (
+    <div className="card">
+      <div className="page-head" style={{ marginBottom: 14 }}>
+        <h2>Transactions</h2>
+        <div className="sub">Every transaction with its fraud risk score, decision and the reasons behind it.</div>
+      </div>
+      {txns.length === 0 && <Empty icon="🧾" title="Nothing here yet" text="You have no transactions yet. Start your first payment to see your activity here." />}
+      {txns.length > 0 && <>
+      <div className="card-title"><h3>All transactions</h3><span className="card-hint" style={{ marginTop: 0 }}>{txns.length} shown</span></div>
+      <table className="data">
+        <thead><tr><th>Date</th><th>Transaction</th><th>Description</th><th>Amount</th><th>Status</th><th>Risk</th><th>Reasons</th></tr></thead>
+        <tbody>
+          {txns.map((t) => (
+            <tr key={t._id}>
+              <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{new Date(t.createdAt).toLocaleString()}</td>
+              <td style={{ fontFamily: 'monospace', fontSize: 12.5 }}>{t.txId}</td>
+              <td>{t.merchant || 'Transfer'}</td>
+              <td className="amount">−{money(t.amount)}</td>
+              <td><span className={`badge ${t.status}`}>{t.status}</span></td>
+              <td><RiskBadge level={t.riskLevel} prob={t.fraudProbability} /></td>
+              <td style={{ color: 'var(--text-dim)', fontSize: 12.5 }}>{(t.reasons || []).join(', ').replaceAll('_', ' ').toLowerCase() || '—'}</td>
+            </tr>
+          ))}
+                  </tbody>
+                </table>
+              </>}
+            </div>
+          );
+        }
+
+function BeneficiaryTab({ data, flashMsg, reload }) {
+  const [form, setForm] = useState({ nickname: '', accountNumber: '', bankName: '' });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const add = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await api('/beneficiaries', { method: 'POST', body: form });
+      flashMsg('ok', `Beneficiary "${form.nickname}" added.`);
+      setForm({ nickname: '', accountNumber: '', bankName: '' });
+      await reload();
+    } catch (err) {
+      flashMsg('error', err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="grid sidebar">
+      <div className="card">
+        <div className="card-title"><h3>Saved payees</h3></div>
+        {data.beneficiaries.length === 0
+          ? <Empty icon="👥" title="No beneficiaries" text="Add someone below to make repeat transfers faster and lower-risk." />
+          : (
+            <table className="data">
+              <thead><tr><th>Nickname</th><th>Account</th><th>Bank</th><th>Added</th></tr></thead>
+              <tbody>
+                {data.beneficiaries.map((b) => (
+                  <tr key={b._id}>
+                    <td><b>{b.nickname}</b></td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12.5 }}>{b.accountNumber}</td>
+                    <td>{b.bankName || '—'}</td>
+                    <td style={{ color: 'var(--text-dim)' }}>{timeAgo(b.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+      </div>
+      <div className="card">
+        <div className="card-title"><h3>Add beneficiary</h3></div>
+        <form onSubmit={add}>
+          <div className="field">
+            <label>Nickname</label>
+            <input required placeholder="Mom" value={form.nickname} onChange={set('nickname')} />
+          </div>
+          <div className="field">
+            <label>Account number</label>
+            <input required placeholder="SPY-XXXXXX-1234" value={form.accountNumber} onChange={set('accountNumber')} />
+          </div>
+          <div className="field">
+            <label>Bank (optional)</label>
+            <input placeholder="Chase" value={form.bankName} onChange={set('bankName')} />
+          </div>
+          <button className="btn" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Add payee'}</button>
+        </form>
+      </div>
+    </div>
+  );
 }
 
-export default function App() {
-  const { token, user } = useAuth();
-  const [auth, setAuth] = useState(Boolean(token && user));
-  if (!auth) return <Auth onAuth={() => setAuth(true)} />;
-  return <Dashboard token={token} user={user} onLogout={() => setAuth(false)} />;
+/* ---------- notifications ---------- */
+
+function NotifTab({ notifs, reload, now }) {
+  const [busyId, setBusyId] = useState(null);
+  const markRead = async (n) => {
+    if (n.read) return;
+    setBusyId(n._id);
+    try { await api(`/notifications/${n._id}/read`, { method: 'POST' }); await reload(); }
+    finally { setBusyId(null); }
+  };
+
+  useEffect(() => {
+    const unread = notifs.filter((n) => !n.read);
+    if (unread.length === 0) return;
+    let cancelled = false;
+    Promise.allSettled(unread.map((n) => api(`/notifications/${n._id}/read`, { method: 'POST' }))).then(() => {
+      if (!cancelled) reload();
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifs.length]);
+
+  return (
+    <div className="card">
+      <div className="card-title"><h3>Alerts & notifications</h3><span className="card-hint" style={{ marginTop: 0 }}>Opening this tab marks everything as read</span></div>
+      {notifs.length === 0
+        ? <Empty icon="🔕" title="No notifications" text="Fraud alerts, payment confirmations and account updates will appear here." />
+        : notifs.map((n) => (
+          <div key={n._id} className={`notif ${n.read ? '' : 'unread'}`} onClick={() => markRead(n)}>
+            <div className="title">
+              <span>{n.type === 'FRAUD_ALERT' ? '🚨' : n.type === 'WARNING' ? '⚠️' : n.type === 'SUCCESS' ? '✅' : 'ℹ️'}</span>
+              {n.title}
+              {!n.read && <span className="badge INFO">NEW</span>}
+            </div>
+            {n.body && <div className="body">{n.body}</div>}
+            <div className="time">{timeAgo(n.createdAt)} · {new Date(n.createdAt).toLocaleString()}</div>
+          </div>
+        ))}
+    </div>
+  );
 }
