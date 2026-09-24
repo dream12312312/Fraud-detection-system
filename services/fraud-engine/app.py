@@ -86,24 +86,47 @@ def build_features(req: ScoreRequest) -> tuple[list[float], list[str]]:
     return [feats[n] for n in names], names
 
 
+def heuristic_reasons(req: ScoreRequest, feats: dict[str, float]) -> dict[str, bool]:
+    """Which of the rule reasons apply to this request (used alongside ML scores)."""
+    return {
+        "AMOUNT_MUCH_HIGHER_THAN_AVG": feats["amount_vs_avg"] > 10,
+        "AMOUNT_HIGHER_THAN_AVG": 4 < feats["amount_vs_avg"] <= 10,
+        "NIGHT_TIME_LARGE_AMOUNT": bool(feats["is_night"]) and req.amount > 1000,
+        "NEW_COUNTRY": feats["is_foreign"] > 0,
+        "NEW_BENEFICIARY": feats["is_new_beneficiary"] > 0,
+        "HIGH_VELOCITY": feats["velocity_1h"] >= 5,
+        "HIGH_VALUE_TRANSACTION": req.amount > 9000,
+    }
+
+
 def heuristic_score(req: ScoreRequest, feats: dict[str, float]) -> tuple[float, list[str]]:
-    """Fallback scorer mirroring the fallback rule engine in the Core API."""
+    """Fallback scorer mirroring the fallback rule engine in the Core API.
+
+    Calibrated so a realistic suspicious transaction actually crosses a decision
+    boundary: a foreign-country transfer from a US user is at minimum MEDIUM/REVIEW,
+    and foreign + large is HIGH/BLOCK. (The old version topped out at ~0.27 for a
+    plain foreign transfer, which silently APPROVED everything.)
+    """
     p = 0.02
     reasons = []
     if feats["amount_vs_avg"] > 10:
         p += 0.45; reasons.append("AMOUNT_12X_USER_AVG" if feats["amount_vs_avg"] > 12 else "AMOUNT_MUCH_HIGHER_THAN_AVG")
     elif feats["amount_vs_avg"] > 4:
-        p += 0.2; reasons.append("AMOUNT_HIGHER_THAN_AVG")
+        p += 0.25; reasons.append("AMOUNT_HIGHER_THAN_AVG")
     if feats["is_night"] and req.amount > 1000:
-        p += 0.2; reasons.append("NIGHT_TIME_LARGE_AMOUNT")
+        p += 0.20; reasons.append("NIGHT_TIME_LARGE_AMOUNT")
     if feats["is_foreign"]:
-        p += 0.25; reasons.append("NEW_COUNTRY")
-    if feats["is_new_beneficiary"] and req.amount > 2000:
-        p += 0.2; reasons.append("NEW_BENEFICIARY_LARGE_AMOUNT")
+        p += 0.35; reasons.append("NEW_COUNTRY")
+        if req.amount > 2000:
+            p += 0.20; reasons.append("FOREIGN_LARGE_AMOUNT")
+    if feats["is_new_beneficiary"]:
+        p += 0.10; reasons.append("NEW_BENEFICIARY")
+        if req.amount > 2000:
+            p += 0.20; reasons.append("NEW_BENEFICIARY_LARGE_AMOUNT")
     if feats["velocity_1h"] >= 5:
-        p += 0.15; reasons.append("HIGH_VELOCITY")
+        p += 0.20; reasons.append("HIGH_VELOCITY")
     if req.amount > 9000:
-        p += 0.3; reasons.append("HIGH_VALUE_TRANSACTION")
+        p += 0.30; reasons.append("HIGH_VALUE_TRANSACTION")
     return min(p, 0.99), reasons
 
 
@@ -133,11 +156,17 @@ def score(req: ScoreRequest):
         p, reasons = heuristic_score(req, feat_map)
         source, version = "HEURISTIC", "heuristic-v1"
     if source == "ML_MODEL":
-        reasons = []
-        if p >= 0.7:
-            reasons.append("MODEL_HIGH_RISK")
-        elif p >= 0.3:
-            reasons.append("MODEL_MEDIUM_RISK")
+        reasons = list(reasons)
+        # Combine the statistical model score with the interpretable rule reasons
+        # so admins/users see *why* a transaction was flagged, not just a number.
+        for reason, cond in heuristic_reasons(req, feat_map).items():
+            if cond:
+                reasons.append(reason)
+        if not reasons:
+            if p >= 0.7:
+                reasons.append("MODEL_HIGH_RISK")
+            elif p >= 0.3:
+                reasons.append("MODEL_MEDIUM_RISK")
 
     if p >= 0.70:
         level, decision = "HIGH", "BLOCK"

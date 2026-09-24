@@ -18,12 +18,40 @@ app.use(cors({ origin: config.corsOrigins, credentials: true }));
 app.use(express.json());
 app.use(morgan('dev'));
 
-app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'sentinelpay-api', time: new Date().toISOString() }));
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'sentinelpay-api', time: new Date().toISOString(), uptime_s: Math.round(process.uptime()) }));
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1', bankingRoutes);
 app.use('/api/v1/admin', adminRoutes);
 
+// Final error handler: always answer with JSON so clients never see an opaque
+// 'Internal Server Error' page (this is what produced the register 500 confusion).
+app.use((err, _req, res, _next) => {
+  console.error('[api] unhandled error:', err);
+  if (res.headersSent) return;
+  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+});
+
+// A crash in async code outside a request must log loudly, not exit silently.
+process.on('unhandledRejection', (reason) => console.error('[api] unhandled rejection:', reason));
+
 const server = http.createServer(app);
+
+// node --watch restarts this process the moment a file changes, sometimes before
+// the previous instance has released port 4000. Retrying the listen instead of
+// exiting turns that race into a clean hot-reload instead of an endless crash loop.
+const LISTEN_RETRY_MS = 1000;
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`[api] port ${config.port} still in use (watch restart race) — retrying in ${LISTEN_RETRY_MS}ms…`);
+    setTimeout(() => {
+      server.close();
+      server.listen(config.port);
+    }, LISTEN_RETRY_MS);
+  } else {
+    console.error('[api] server error:', err);
+  }
+});
+
 const io = new Server(server, { cors: { origin: config.corsOrigins, credentials: true } });
 
 io.on('connection', (socket) => {
@@ -57,6 +85,11 @@ async function seedAdmin() {
 async function start() {
   await connectDb(config.mongoUri);
   console.log('[db] connected');
+  // Make sure the unique indexes declared in models.js actually exist in the DB.
+  // A stale/missing index (e.g. after schema changes) is otherwise only
+  // discovered as a confusing duplicate-key error at registration time.
+  const { User, Account, Transaction, Beneficiary, Notification } = await import('./models.js');
+  await Promise.all([User.syncIndexes(), Account.syncIndexes(), Transaction.syncIndexes(), Beneficiary.syncIndexes(), Notification.syncIndexes()]);
   const admin = await seedAdmin();
   if (!(await Account.findOne({ userId: admin._id }))) {
     await Account.create({ userId: admin._id, accountNumber: 'SPY-ADMIN-001', balance: 100000 });
