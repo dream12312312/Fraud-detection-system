@@ -5,9 +5,12 @@ const { Schema, model, Types } = mongoose;
 const UserSchema = new Schema({
   email: { type: String, required: true, unique: true, lowercase: true, index: true },
   passwordHash: { type: String, required: true },
+  // Set when an admin assigns a temporary password; the user must change it
+  // before anything else in the app is usable.
+  mustChangePassword: { type: Boolean, default: false },
   fullName: { type: String, required: true },
   role: { type: String, enum: ['user', 'admin'], default: 'user' },
-  status: { type: String, enum: ['PENDING', 'ACTIVE', 'DISABLED', 'BLOCKED'], default: 'ACTIVE' },
+  status: { type: String, enum: ['PENDING', 'ACTIVE', 'DISABLED', 'BLOCKED'], default: 'PENDING' },
   homeCountry: { type: String, default: 'US' },
   phone: String,
   createdAt: { type: Date, default: Date.now }
@@ -53,7 +56,7 @@ const TransactionSchema = new Schema({
   decision: { type: String, enum: ['APPROVE', 'REVIEW', 'BLOCK', null] },
   reasons: [String],
   modelVersion: String,
-  decisionSource: { type: String, enum: ['ML_MODEL', 'RULES_FALLBACK', null] },
+  decisionSource: { type: String, enum: ['ML_MODEL', 'RULES_FALLBACK', 'HEURISTIC', null] },
   createdAt: { type: Date, default: Date.now, index: true },
   updatedAt: { type: Date, default: Date.now }
 });
@@ -66,6 +69,29 @@ const NotificationSchema = new Schema({
   read: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
+
+/**
+ * Manual model-training runs triggered from the admin console.
+ * States: QUEUED -> RUNNING -> COMPLETED | FAILED. Never started automatically.
+ */
+const TrainingRunSchema = new Schema({
+  status: { type: String, enum: ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED'], default: 'QUEUED', index: true },
+  triggeredBy: { type: Types.ObjectId, ref: 'User' },
+  databricksRunId: Number,
+  databricksJobId: Number,
+  stateMessage: String,
+  metrics: {
+    precision: Number, recall: Number, f1: Number, rocAuc: Number, prAuc: Number
+  },
+  championModel: String,
+  mlflowRunId: String,
+  mlflowExperimentId: String,
+  startedAt: Date,
+  finishedAt: Date,
+  createdAt: { type: Date, default: Date.now, index: true }
+});
+
+export const TrainingRun = model('TrainingRun', TrainingRunSchema);
 
 const ApiLogSchema = new Schema({
   method: String, path: String, status: Number, latencyMs: Number,

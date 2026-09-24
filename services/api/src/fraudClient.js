@@ -21,13 +21,19 @@ export async function scoreTransaction(payload) {
     if (!res.ok) return null;
     const data = await res.json();
     if (typeof data.fraud_probability !== 'number') return null;
+    // Normalize the engine's source label to the enum used by the Transaction
+    // schema. The engine reports HEURISTIC when no trained model is loaded and
+    // ML_MODEL otherwise; anything unexpected is treated as heuristic so a
+    // schema mismatch can never fail a payment again.
+    const KNOWN_SOURCES = ['ML_MODEL', 'HEURISTIC'];
+    const source = KNOWN_SOURCES.includes(data.source) ? data.source : 'HEURISTIC';
     return {
       fraudProbability: data.fraud_probability,
       riskLevel: data.risk_level || 'LOW',
       decision: data.decision || 'APPROVE',
       reasons: Array.isArray(data.reasons) ? data.reasons : [],
       modelVersion: data.model_version || 'unknown',
-      source: data.source || 'ML_MODEL'
+      source
     };
   } catch {
     return null;

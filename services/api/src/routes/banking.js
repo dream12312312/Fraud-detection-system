@@ -1,4 +1,4 @@
-﻿﻿import { Router } from 'express';
+﻿import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { User, Account, Beneficiary, Transaction, Notification } from '../models.js';
 import { requireAuth } from '../auth.js';
@@ -93,6 +93,17 @@ router.post('/transfer', async (req, res) => {
     await from.save();
 
     // ---- fraud scoring (hot path) ----
+    // Real behavioral features instead of engine defaults: transactions in the
+    // last hour (velocity) and the user's 30-day average amount.
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [velocity_1h, avgAgg] = await Promise.all([
+      Transaction.countDocuments({ userId: req.user._id, createdAt: { $gte: hourAgo } }),
+      Transaction.aggregate([
+        { $match: { userId: req.user._id, createdAt: { $gte: monthAgo } } },
+        { $group: { _id: null, avg: { $avg: '$amount' } } }
+      ])
+    ]);
     let decision = await scoreTransaction({
       transaction_id: tx.txId,
       user_id: String(req.user._id),
@@ -103,7 +114,9 @@ router.post('/transfer', async (req, res) => {
       home_country: req.user.homeCountry || 'US',
       is_new_beneficiary: !beneficiary,
       channel: 'WEB',
-      timestamp: tx.createdAt.toISOString()
+      timestamp: tx.createdAt.toISOString(),
+      velocity_1h,
+      avg_amount_30d: avgAgg[0]?.avg || amt
     });
     if (!decision) {
       decision = fallbackRules({ amount: amt, dailyLimit: from.dailyLimit, isNewBeneficiary: !beneficiary, homeCountry: req.user.homeCountry, country: tx.country });
@@ -138,9 +151,15 @@ router.post('/transfer', async (req, res) => {
     await publish(TOPICS.raw, tx.txId, { event: 'transaction.created', transaction_id: tx.txId, user_id: String(req.user._id), amount: amt, type: tx.type, country: tx.country, is_new_beneficiary: !beneficiary, status: tx.status });
     await publish(TOPICS.status, tx.txId, { event: 'transaction.decision', transaction_id: tx.txId, decision, status: tx.status });
 
-    res.status(202).json({ txId: tx.txId, status: tx.status, fraudProbability: tx.fraudProbability, riskLevel: tx.riskLevel, decision: tx.decision, reasons: tx.reasons, source: tx.decisionSource });
+    res.status(202).json({ txId: tx.txId, amount: amt, status: tx.status, fraudProbability: tx.fraudProbability, riskLevel: tx.riskLevel, decision: tx.decision, reasons: tx.reasons, source: tx.decisionSource });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // Full technical detail goes to server logs; the user only ever sees a
+    // friendly message (never a raw Mongoose/Mongo validation dump).
+    console.error('[banking] transfer failed:', err);
+    const technical = err.name === 'ValidationError' || err.name === 'MongoServerError' || err.name === 'CastError';
+    res.status(500).json({ error: technical
+      ? 'We could not process this payment right now. Please try again in a moment.'
+      : (err.message || 'Unexpected error while processing the payment.') });
   }
 });
 
@@ -149,12 +168,22 @@ router.post('/transactions/:txId/confirm', async (req, res) => {
   if (!tx) return res.status(404).json({ error: 'Transaction not found' });
   if (tx.status !== 'CHALLENGED') return res.status(400).json({ error: `Cannot confirm transaction in status ${tx.status}` });
   const from = await Account.findOne({ userId: req.user._id, type: 'CHECKING' });
-  if (from && from.balance - from.heldAmount + tx.amount >= tx.amount) {
-    from.balance -= tx.amount; from.heldAmount -= tx.amount; await from.save();
+  // The hold is already reserved in heldAmount; completing must debit the real
+  // balance. If the money is gone (e.g. another confirmed payment first), the
+  // transaction fails instead of driving the account negative.
+  if (!from || from.balance < tx.amount) {
+    tx.status = 'FAILED';
+    if (from) { from.heldAmount = Math.max(0, from.heldAmount - tx.amount); await from.save(); }
+    await tx.save();
+    await notify(req, req.user._id, 'Payment failed', `${tx.txId} could not be completed: insufficient balance.`, 'WARNING');
+    return res.json({ txId: tx.txId, status: tx.status });
   }
+  from.balance -= tx.amount;
+  from.heldAmount = Math.max(0, from.heldAmount - tx.amount);
+  await from.save();
   tx.status = 'COMPLETED'; await tx.save();
   await notify(req, req.user._id, 'Transaction confirmed', `${tx.txId} completed after your confirmation.`, 'SUCCESS');
-  res.json({ txId: tx.txId, status: tx.status });
+  res.json({ txId: tx.txId, amount: tx.amount, status: tx.status });
 });
 
 router.post('/transactions/:txId/report', async (req, res) => {
