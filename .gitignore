@@ -1,0 +1,21 @@
+# Node
+node_modules/
+dist/
+*.log
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+services/ml/data/
+services/ml/artifacts/
+mlruns/
+
+# Databricks extension
+.databricks
+
+# Env & secrets
+.env.local
+
+# OS / editor
+.DS_Store

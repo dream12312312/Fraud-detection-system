@@ -1,0 +1,213 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1000" viewBox="0 0 1500 1000" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#e2e8f0"/>
+    </marker>
+    <style>
+      .title { font-size: 15px; font-weight: 700; fill: #ffffff; letter-spacing: .5px; }
+      .sub   { font-size: 12px; fill: #e2e8f0; font-style: italic; }
+      .item  { font-size: 12.5px; fill: #f8fafc; }
+      .lbl   { font-size: 11px; fill: #cbd5e1; }
+      .region{ font-size: 13px; font-weight: 700; fill: #94a3b8; letter-spacing: 1.5px; }
+      .line  { stroke: #e2e8f0; stroke-width: 2; fill: none; }
+      .hot   { stroke: #f87171; stroke-width: 2.5; fill: none; }
+      .cold  { stroke: #60a5fa; stroke-width: 2.5; fill: none; stroke-dasharray: 7 4; }
+      .box   { stroke: #ffffff33; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1500" height="1000" fill="#0f172a"/>
+  <text x="40" y="38" font-size="22" font-weight="700" fill="#ffffff">Real-Time Financial Fraud Detection Platform - System Architecture</text>
+
+  <!-- Regions -->
+  <rect x="20" y="60" width="920" height="900" rx="16" fill="#111827" stroke="#334155" stroke-dasharray="6 6"/>
+  <text x="40" y="84" class="region">LOCAL MACHINE / DOCKER  (+ MongoDB Atlas cloud)</text>
+  <rect x="960" y="60" width="520" height="900" rx="16" fill="#111827" stroke="#f97316" stroke-dasharray="6 6"/>
+  <text x="980" y="84" class="region" fill="#fdba74">DATABRICKS FREE EDITION (SERVERLESS, CLOUD)</text>
+
+  <!-- User App -->
+  <rect x="50" y="110" width="220" height="200" rx="12" fill="#1e3a8a" class="box"/>
+  <text x="160" y="138" text-anchor="middle" class="title">USER BANKING APP</text>
+  <text x="160" y="157" text-anchor="middle" class="sub">React + Vite + MUI  ·  :5173</text>
+  <text x="66" y="188" class="item">• Register / Login / Profile</text>
+  <text x="66" y="210" class="item">• Accounts &amp; Balances</text>
+  <text x="66" y="232" class="item">• Transfers &amp; Payments</text>
+  <text x="66" y="254" class="item">• Beneficiaries &amp; Cards</text>
+  <text x="66" y="276" class="item">• Live fraud alerts</text>
+  <text x="66" y="298" class="item">• Confirm / Report fraud</text>
+
+  <!-- Admin App -->
+  <rect x="50" y="360" width="220" height="220" rx="12" fill="#581c87" class="box"/>
+  <text x="160" y="388" text-anchor="middle" class="title">ADMIN / DEV CONSOLE</text>
+  <text x="160" y="407" text-anchor="middle" class="sub">React + Vite + MUI  ·  :5174</text>
+  <text x="66" y="438" class="item">• User management</text>
+  <text x="66" y="460" class="item">• Live transaction feed</text>
+  <text x="66" y="482" class="item">• Fraud alerts &amp; cases</text>
+  <text x="66" y="504" class="item">• Pipeline monitoring</text>
+  <text x="66" y="526" class="item">• ML model monitoring</text>
+  <text x="66" y="548" class="item">• API logs &amp; security events</text>
+  <text x="66" y="570" class="item">• Simulator control</text>
+
+  <!-- Simulator -->
+  <rect x="50" y="640" width="220" height="150" rx="12" fill="#334155" class="box"/>
+  <text x="160" y="668" text-anchor="middle" class="title">TXN SIMULATOR</text>
+  <text x="160" y="687" text-anchor="middle" class="sub">Python + Faker</text>
+  <text x="66" y="716" class="item">• Normal traffic profiles</text>
+  <text x="66" y="738" class="item">• Fraud scenarios</text>
+  <text x="66" y="760" class="item">• Calls Core API as bot users</text>
+  <text x="66" y="782" class="item">• Generates labeled data</text>
+
+  <!-- API -->
+  <rect x="330" y="110" width="250" height="470" rx="12" fill="#065f46" class="box"/>
+  <text x="455" y="138" text-anchor="middle" class="title">CORE API</text>
+  <text x="455" y="157" text-anchor="middle" class="sub">Node.js + Express  ·  :4000</text>
+  <text x="346" y="192" class="item">• JWT auth (access + refresh)</text>
+  <text x="346" y="216" class="item">• RBAC: user / admin</text>
+  <text x="346" y="240" class="item">• Banking services</text>
+  <text x="346" y="264" class="item">• Transaction orchestrator</text>
+  <text x="346" y="288" class="item">• Funds hold / ledger</text>
+  <text x="346" y="312" class="item">• Context enrichment</text>
+  <text x="346" y="336" class="item">• Kafka producer + consumer</text>
+  <text x="346" y="360" class="item">• Socket.IO real-time gateway</text>
+  <text x="346" y="384" class="item">• Fallback rule engine</text>
+  <text x="346" y="408" class="item">• Audit + API request logs</text>
+  <text x="346" y="432" class="item">• Databricks monitor client</text>
+  <text x="346" y="456" class="item">• Rate limiting, Helmet, Zod</text>
+  <text x="346" y="490" class="sub">/api/v1/auth  /accounts  /transactions</text>
+  <text x="346" y="508" class="sub">/beneficiaries  /payment-methods</text>
+  <text x="346" y="526" class="sub">/notifications  /fraud-cases</text>
+  <text x="346" y="544" class="sub">/admin/*  (admin role only)</text>
+
+  <!-- Mongo -->
+  <rect x="330" y="640" width="250" height="260" rx="12" fill="#166534" class="box"/>
+  <text x="455" y="668" text-anchor="middle" class="title">MONGODB ATLAS</text>
+  <text x="455" y="687" text-anchor="middle" class="sub">M0 Free · Operational (OLTP) store</text>
+  <text x="346" y="718" class="item">• users · sessions</text>
+  <text x="346" y="740" class="item">• accounts · ledger_entries</text>
+  <text x="346" y="762" class="item">• transactions</text>
+  <text x="346" y="784" class="item">• beneficiaries · payment_methods</text>
+  <text x="346" y="806" class="item">• notifications · fraud_cases</text>
+  <text x="346" y="828" class="item">• user_behavior_profiles</text>
+  <text x="346" y="850" class="item">• audit_logs · api_logs (TTL)</text>
+  <text x="346" y="872" class="item">• pipeline_heartbeats</text>
+
+  <!-- Kafka -->
+  <rect x="640" y="110" width="260" height="300" rx="12" fill="#7c2d12" class="box"/>
+  <text x="770" y="138" text-anchor="middle" class="title">APACHE KAFKA (KRaft)</text>
+  <text x="770" y="157" text-anchor="middle" class="sub">Docker · localhost:9092</text>
+  <text x="656" y="190" class="item">Topics</text>
+  <text x="656" y="214" class="item">▸ txn.events.raw</text>
+  <text x="656" y="238" class="item">▸ txn.fraud.scored</text>
+  <text x="656" y="262" class="item">▸ txn.status.updates</text>
+  <text x="656" y="286" class="item">▸ user.activity</text>
+  <text x="656" y="310" class="item">▸ security.events</text>
+  <text x="656" y="334" class="item">▸ system.metrics</text>
+  <text x="656" y="358" class="item">▸ *.dlq (dead letters)</text>
+  <text x="656" y="392" class="sub">Kafka UI · localhost:8080</text>
+
+  <!-- Fraud Engine -->
+  <rect x="640" y="450" width="260" height="220" rx="12" fill="#9d174d" class="box"/>
+  <text x="770" y="478" text-anchor="middle" class="title">FRAUD SCORING ENGINE</text>
+  <text x="770" y="497" text-anchor="middle" class="sub">Python · FastAPI · :8000</text>
+  <text x="656" y="528" class="item">• Consumes txn.events.raw</text>
+  <text x="656" y="550" class="item">• Real-time feature builder</text>
+  <text x="656" y="572" class="item">• ML model (pulled from MLflow)</text>
+  <text x="656" y="594" class="item">• Hard rules + risk policy</text>
+  <text x="656" y="616" class="item">• Explanations (top reasons)</text>
+  <text x="656" y="646" class="item" font-weight="700">→ APPROVE / REVIEW / BLOCK</text>
+
+  <!-- Lake Bridge -->
+  <rect x="640" y="710" width="260" height="190" rx="12" fill="#1e293b" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="770" y="738" text-anchor="middle" class="title">LAKE INGEST BRIDGE</text>
+  <text x="770" y="757" text-anchor="middle" class="sub">Python · Kafka consumer group</text>
+  <text x="656" y="788" class="item">• Reads all event topics</text>
+  <text x="656" y="810" class="item">• Micro-batches → JSON files</text>
+  <text x="656" y="832" class="item">• Uploads via Databricks SDK</text>
+  <text x="656" y="854" class="item">• Commits offsets after upload</text>
+  <text x="656" y="876" class="item">• Heartbeat + lag metrics</text>
+
+  <!-- Databricks -->
+  <rect x="990" y="110" width="460" height="80" rx="12" fill="#334155" class="box"/>
+  <text x="1220" y="140" text-anchor="middle" class="title">UNITY CATALOG VOLUME · LANDING ZONE</text>
+  <text x="1220" y="162" text-anchor="middle" class="item">/Volumes/fraud/landing/events/&lt;topic&gt;/&lt;date&gt;/*.json</text>
+
+  <rect x="990" y="220" width="460" height="90" rx="12" fill="#92400e" class="box"/>
+  <text x="1220" y="248" text-anchor="middle" class="title">BRONZE · Delta Lake</text>
+  <text x="1220" y="270" text-anchor="middle" class="item">Raw events, append-only, + ingest metadata</text>
+  <text x="1220" y="292" text-anchor="middle" class="sub">Auto Loader (cloudFiles) + Structured Streaming</text>
+
+  <rect x="990" y="340" width="460" height="90" rx="12" fill="#475569" class="box"/>
+  <text x="1220" y="368" text-anchor="middle" class="title">SILVER · Delta Lake</text>
+  <text x="1220" y="390" text-anchor="middle" class="item">Typed, deduplicated, validated, joined decisions</text>
+  <text x="1220" y="412" text-anchor="middle" class="sub">Data-quality rules + quarantine table</text>
+
+  <rect x="990" y="460" width="460" height="110" rx="12" fill="#a16207" class="box"/>
+  <text x="1220" y="488" text-anchor="middle" class="title">GOLD · Delta Lake</text>
+  <text x="1220" y="510" text-anchor="middle" class="item">ML feature table · user behavior profiles</text>
+  <text x="1220" y="532" text-anchor="middle" class="item">Fraud predictions history · model performance</text>
+  <text x="1220" y="554" text-anchor="middle" class="item">Business &amp; fraud KPIs (hourly aggregates)</text>
+
+  <rect x="990" y="610" width="460" height="130" rx="12" fill="#0e7490" class="box"/>
+  <text x="1220" y="638" text-anchor="middle" class="title">MLFLOW · Experiments + Model Registry</text>
+  <text x="1220" y="662" text-anchor="middle" class="item">Logistic Regression · Random Forest · XGBoost</text>
+  <text x="1220" y="684" text-anchor="middle" class="item">Metrics: Precision · Recall · F1 · ROC-AUC · PR-AUC</text>
+  <text x="1220" y="706" text-anchor="middle" class="item">Best model → registered with alias @champion</text>
+  <text x="1220" y="728" text-anchor="middle" class="sub">Trained locally (.venv) or on Databricks — same code</text>
+
+  <rect x="990" y="770" width="460" height="130" rx="12" fill="#3730a3" class="box"/>
+  <text x="1220" y="798" text-anchor="middle" class="title">LAKEFLOW JOBS (Serverless) + SQL Warehouse</text>
+  <text x="1220" y="822" text-anchor="middle" class="item">bronze → silver → gold  (trigger: availableNow, scheduled)</text>
+  <text x="1220" y="844" text-anchor="middle" class="item">Data-quality checks · retraining job</text>
+  <text x="1220" y="866" text-anchor="middle" class="item">Deployed with Databricks Asset Bundle (databricks.yml)</text>
+  <text x="1220" y="888" text-anchor="middle" class="sub">Queried by Core API for admin monitoring</text>
+
+  <!-- Arrows: clients <-> API -->
+  <line x1="272" y1="200" x2="328" y2="200" class="hot" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="300" y="190" text-anchor="middle" class="lbl">REST/WS</text>
+  <line x1="272" y1="470" x2="328" y2="470" class="line" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="300" y="460" text-anchor="middle" class="lbl">REST/WS</text>
+  <path d="M272,715 L300,715 L300,545 L328,545" class="line" marker-end="url(#arrow)"/>
+
+  <!-- API <-> Mongo -->
+  <line x1="455" y1="582" x2="455" y2="638" class="line" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="465" y="615" class="lbl">Mongoose</text>
+
+  <!-- API <-> Kafka -->
+  <line x1="582" y1="180" x2="638" y2="180" class="hot" marker-end="url(#arrow)"/>
+  <text x="610" y="170" text-anchor="middle" class="lbl">produce</text>
+  <line x1="638" y1="330" x2="582" y2="330" class="hot" marker-end="url(#arrow)"/>
+  <text x="610" y="320" text-anchor="middle" class="lbl">consume</text>
+
+  <!-- Kafka <-> Engine -->
+  <line x1="730" y1="412" x2="730" y2="448" class="hot" marker-end="url(#arrow)"/>
+  <text x="722" y="436" text-anchor="end" class="lbl">raw</text>
+  <line x1="810" y1="448" x2="810" y2="412" class="hot" marker-end="url(#arrow)"/>
+  <text x="818" y="436" class="lbl">scored</text>
+
+  <!-- Kafka -> Bridge -->
+  <path d="M902,300 L925,300 L925,780 L902,780" class="cold" marker-end="url(#arrow)"/>
+
+  <!-- Bridge -> Landing -->
+  <path d="M902,860 L948,860 L948,150 L988,150" class="cold" marker-end="url(#arrow)"/>
+  <text x="962" y="220" class="lbl" transform="rotate(90 962 220)">HTTPS (Files API)</text>
+
+  <!-- Medallion -->
+  <line x1="1220" y1="192" x2="1220" y2="218" class="cold" marker-end="url(#arrow)"/>
+  <line x1="1220" y1="312" x2="1220" y2="338" class="cold" marker-end="url(#arrow)"/>
+  <line x1="1220" y1="432" x2="1220" y2="458" class="cold" marker-end="url(#arrow)"/>
+  <line x1="1220" y1="572" x2="1220" y2="608" class="cold" marker-end="url(#arrow)"/>
+  <text x="1230" y="595" class="lbl">training data</text>
+
+  <!-- MLflow -> Engine -->
+  <path d="M988,690 L902,600" class="line" marker-end="url(#arrow)"/>
+
+  <!-- Databricks -> API monitoring -->
+  <path d="M1220,902 L1220,940 L610,940 L610,560 L582,560" class="line" marker-end="url(#arrow)"/>
+  <text x="900" y="932" text-anchor="middle" class="lbl">Databricks REST: Jobs API · SQL Statement API · MLflow API  (pipeline, Delta &amp; model metrics)</text>
+
+  <!-- Legend -->
+  <line x1="40" y1="982" x2="80" y2="982" class="hot"/>
+  <text x="88" y="986" class="lbl">HOT PATH (sub-second): App → API → Kafka → Fraud Engine → Kafka → API → Socket.IO → User &amp; Admin UI</text>
+  <line x1="820" y1="982" x2="860" y2="982" class="cold"/>
+  <text x="868" y="986" class="lbl">COLD PATH (minutes): Kafka → Bridge → Bronze → Silver → Gold → MLflow retraining</text>
+</svg>

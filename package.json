@@ -1,0 +1,21 @@
+{
+  "name": "sentinelpay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Real-time financial fraud detection platform",
+  "workspaces": [
+    "apps/*",
+    "services/api"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace services/api\" \"npm run dev --workspace apps/user-app\" \"npm run dev --workspace apps/admin-app\"",
+    "dev:api": "npm run dev --workspace services/api",
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
