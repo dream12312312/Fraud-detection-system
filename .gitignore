@@ -15,6 +15,7 @@ mlruns/
 .databricks
 
 # Env & secrets
+.env
 .env.local
 
 # OS / editor
