@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    model_training:
+      name: sentinelpay-model-training
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "1"
+            dependencies:
+              - mlflow
+              - scikit-learn
+      tasks:
+        - task_key: train
+          notebook_task:
+            notebook_path: ../databricks/notebooks/04_train_model.py
+          environment_key: serverless
+      queue:
+        enabled: true
+
