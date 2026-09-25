@@ -4,6 +4,7 @@ import { api, saveSession, clearSession, verifySession, setAccessToken, setSessi
 import { PaymentJourney, ProtectionStrip } from './journey.jsx';
 import { ShieldArt, PipelineArt } from './illustrations.jsx';
 import { ThemeToggle } from './theme.jsx';
+import { MoneyChart, WhereMoneyWent, RiskMap, SignalPreview } from './charts.jsx';
 // note: the component-local useFlashSafe below replaces lib.js's useFlash so the
 // flash timer is cancellable (avoids an older flash wiping a newer one)
 
@@ -327,7 +328,7 @@ function Shell({ user, onUser, onLogout }) {
   const load = useCallback(async () => {
     try {
       const [accounts, txns, notifs, beneficiaries] = await Promise.all([
-        api('/accounts'), api('/transactions'), api('/notifications'), api('/beneficiaries')
+        api('/accounts'), api('/transactions?limit=200'), api('/notifications'), api('/beneficiaries')
       ]);
       setData({ accounts, txns, notifs, beneficiaries });
     } catch (err) {
@@ -403,7 +404,7 @@ function Shell({ user, onUser, onLogout }) {
           <Flash flash={flash} onClose={clearFlash} />
 
           {tab === 'overview' && (
-            <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} notifs={data.notifs} loading={loading} go={setTab} onReview={openReview} />
+            <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} beneficiaries={data.beneficiaries} notifs={data.notifs} loading={loading} go={setTab} onReview={openReview} />
           )}
           {tab === 'transfer' && <TransferTab data={data} flashMsg={flashMsg} reload={load} />}
           {tab === 'transactions' && <TxnTab txns={data.txns} loading={loading} />}
@@ -432,23 +433,62 @@ function useFlashSafe() {
 
 /* ---------- overview ---------- */
 
-function OverviewTab({ user, checking, savings, txns, notifs, loading, go, onReview }) {
+/** Compact, clickable stat pills — replaces five separate KPI cards with one row. */
+function StatStrip({ loading, balance, n, blocked, unread, go }) {
+  return (
+    <div className="stat-strip">
+      <div className="stat" title="Money in your checking account, including funds on hold">
+        <span className="stat-ico">💼</span><span className="stat-v">{loading ? '…' : money(balance)}</span><span className="stat-l">Checking balance</span>
+      </div>
+      <button className="stat as-btn" onClick={() => go('transactions')} title="Every transaction you have made">
+        <span className="stat-ico">🧾</span><span className="stat-v">{n}</span><span className="stat-l">Transactions</span>
+      </button>
+      <button className="stat as-btn" onClick={() => go('transactions')} title="Transactions our fraud engine stopped">
+        <span className="stat-ico">🚨</span><span className="stat-v" style={{ color: blocked ? 'var(--danger)' : undefined }}>{blocked}</span><span className="stat-l">Blocked by fraud AI</span>
+      </button>
+      <button className="stat as-btn" onClick={() => go('notifications')} title="Unread security and account notifications">
+        <span className="stat-ico">🔔</span><span className="stat-v" style={{ color: unread ? 'var(--warn)' : undefined }}>{unread}</span><span className="stat-l">Unread alerts</span>
+      </button>
+    </div>
+  );
+}
+
+/** The "how it works" explainer, collapsed by default for returning users so the
+ * page opens on real activity instead of onboarding copy. Opens itself once for a
+ * brand-new user (no transactions yet) as soon as that is actually known — `isNew`
+ * flips from unknown to true/false only after the first load finishes. */
+function ProtectCollapse({ go, isNew }) {
+  const [open, setOpen] = useState(false);
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (isNew && !autoOpened.current) { autoOpened.current = true; setOpen(true); }
+  }, [isNew]);
+  return (
+    <div className="card protect-card">
+      <button className="protect-toggle" onClick={() => setOpen((o) => !o)}>
+        <span className="card-title" style={{ margin: 0, flex: 1 }}>
+          <h3><span className="ico">🛡️</span> How every payment is protected</h3>
+        </span>
+        <span className="chev">{open ? '▲ Hide' : '▼ Show how'}</span>
+      </button>
+      {open && (
+        <>
+          <ProtectionStrip />
+          <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+            <button className="btn ghost sm" onClick={() => go('transactions')}>See it on your payments</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function OverviewTab({ user, checking, savings, txns, beneficiaries, notifs, loading, go, onReview }) {
   const unread = notifs.filter((n) => !n.read).length;
   const challenged = txns.find((t) => t.status === 'CHALLENGED');
   const blocked = txns.filter((t) => t.status === 'BLOCKED').length;
   const avail = checking ? checking.balance - checking.heldAmount : 0;
-
-  // 7-day spending chart data (one bar per day, last 7 days)
-  const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const label = d.toLocaleDateString('en-US', { weekday: 'short' });
-    const key = d.toDateString();
-    const total = txns.filter((t) => new Date(t.createdAt).toDateString() === key)
-      .reduce((s, t) => s + Number(t.amount || 0), 0);
-    days.push({ label, total });
-  }
-  const maxDay = Math.max(...days.map((d) => d.total), 1);
+  const heldPct = checking?.balance ? Math.min((checking.heldAmount / checking.balance) * 100, 100) : 0;
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -462,7 +502,12 @@ function OverviewTab({ user, checking, savings, txns, notifs, loading, go, onRev
             <div className="big-balance">{loading ? '…' : money(avail)}</div>
             <div className="hero-meta">
               Available to spend · {checking?.accountNumber || '—'}
-              {checking?.heldAmount > 0 ? ` · ${money(checking.heldAmount)} on hold` : ''}
+              {checking?.heldAmount > 0 && (
+                <span className="hold-pill" title={`${money(checking.heldAmount)} held while payments are being checked`}>
+                  <span className="hold-bar"><span style={{ width: `${heldPct}%` }} /></span>
+                  {money(checking.heldAmount)} on hold
+                </span>
+              )}
             </div>
           </div>
           <div className="quick-actions">
@@ -473,18 +518,9 @@ function OverviewTab({ user, checking, savings, txns, notifs, loading, go, onRev
         <ShieldArt className="hero-art" />
       </div>
 
-      <div className="card protect-card">
-        <div className="card-title"><h3><span className="ico">🛡️</span> How every payment is protected</h3><button className="btn ghost sm" onClick={() => go('transactions')}>See it on your payments</button></div>
-        <ProtectionStrip />
-      </div>
+      <StatStrip loading={loading} balance={checking?.balance} n={txns.length} blocked={blocked} unread={unread} go={go} />
 
-      <div className="kpi-row" style={{ marginBottom: 18 }}>
-        <div className="kpi" title="Money in your checking account, including funds on hold"><div className="v">{loading ? '…' : money(checking?.balance)}</div><div className="l">💼 Checking balance</div></div>
-        <div className="kpi" title="Money reserved for transactions waiting on a fraud decision"><div className="v">{loading ? '…' : money(checking?.heldAmount || 0)}</div><div className="l">🔒 On hold</div></div>
-        <div className="kpi" title="Total number of transactions you have made"><div className="v">{txns.length}</div><div className="l">🧾 Transactions</div></div>
-        <div className="kpi" title="Transactions our fraud engine stopped"><div className="v" style={{ color: blocked ? 'var(--danger)' : undefined }}>{blocked}</div><div className="l">🚨 Blocked by fraud AI</div></div>
-        <div className="kpi" title="Unread security and account notifications"><div className="v" style={{ color: unread ? 'var(--warn)' : undefined }}>{unread}</div><div className="l">🔔 Unread alerts</div></div>
-      </div>
+      <ProtectCollapse go={go} isNew={!loading && txns.length === 0} />
 
       <div className="grid sidebar">
         <div>
@@ -501,21 +537,12 @@ function OverviewTab({ user, checking, savings, txns, notifs, loading, go, onRev
 
           <div className="card" style={{ marginTop: challenged ? 18 : 0 }}>
             <div className="card-title">
-              <h3><span className="ico">📊</span> Spending — last 7 days</h3>
+              <h3><span className="ico">📊</span> Your money over time</h3>
             </div>
             {txns.length === 0
-              ? <Empty icon="📊" title="Nothing to chart yet" text="Once you make your first transfer or payment, your daily spending will appear here." />
-              : (
-                <div className="sparkbars">
-                  {days.map((d) => (
-                    <div key={d.label} className={`sparkbar ${d.total ? '' : 'zero'}`} title={`${d.label}: ${money(d.total)} spent`}>
-                      <span className="amt">{d.total ? money(d.total) : ''}</span>
-                      <div className="bar" style={{ height: `${Math.max((d.total / maxDay) * 100, 4)}%` }} />
-                      <span className="day">{d.label}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              ? <Empty icon="📊" title="Nothing to chart yet" text="Once you make your first transfer or payment, your daily money in and out will appear here." />
+              : <MoneyChart txns={txns} />}
+            {txns.length >= 200 && <div className="card-hint">Based on your latest 200 transactions.</div>}
           </div>
 
           <div className="card">
@@ -527,19 +554,21 @@ function OverviewTab({ user, checking, savings, txns, notifs, loading, go, onRev
               : txns.length === 0
                 ? <Empty icon="🧾" title="No transactions yet" text="You have no transactions yet. Start your first payment to see your activity here." />
                 : (
-                  <table className="data">
-                    <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
-                    <tbody>
-                      {txns.slice(0, 6).map((t) => (
-                        <tr key={t._id}>
-                          <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{timeAgo(t.createdAt)}</td>
-                          <td>{t.merchant || 'Transfer'} <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>{t.txId}</span></td>
-                          <td className={`amount ${t.type === 'DEPOSIT' ? 'in' : ''}`}>{t.type === 'DEPOSIT' ? '+' : '−'}{money(t.amount)}</td>
-                          <td><span className={`badge ${t.status}`}>{t.status}</span></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className="table-wrap">
+                    <table className="data">
+                      <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
+                      <tbody>
+                        {txns.slice(0, 6).map((t) => (
+                          <tr key={t._id}>
+                            <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{timeAgo(t.createdAt)}</td>
+                            <td>{t.merchant || 'Transfer'} <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>{t.txId}</span></td>
+                            <td className={`amount ${t.type === 'DEPOSIT' ? 'in' : ''}`}>{t.type === 'DEPOSIT' ? '+' : '−'}{money(t.amount)}</td>
+                            <td><span className={`badge ${t.status}`}>{t.status}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
           </div>
         </div>
@@ -564,13 +593,9 @@ function OverviewTab({ user, checking, savings, txns, notifs, loading, go, onRev
           </div>
 
           <div className="card">
-            <div className="card-title"><h3><span className="ico">👤</span> Profile</h3></div>
-            <div style={{ fontSize: 14 }}>
-              <div className="review-row"><span className="k">Name</span><b>{user.fullName}</b></div>
-              <div className="review-row"><span className="k">Email</span><b>{user.email}</b></div>
-              <div className="review-row"><span className="k">Home country</span><b>{user.homeCountry || 'US'}</b></div>
-            </div>
-            <div className="card-hint">Transfers to a country other than your home country are reviewed more strictly by the fraud engine.</div>
+            <div className="card-title"><h3><span className="ico">🍩</span> Where your money went</h3></div>
+            <WhereMoneyWent txns={txns} beneficiaries={beneficiaries} />
+            <div className="card-hint">Completed payments only, grouped by payee or merchant. Home country for security checks: <b>{user.homeCountry || 'US'}</b>.</div>
           </div>
         </div>
       </div>
@@ -586,7 +611,16 @@ function TransferTab({ data, flashMsg, reload }) {
   const [form, setForm] = useState({ toAccount: '', amount: '', merchant: '', country: 'US' });
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState(null);
+  const [signals, setSignals] = useState(null);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // live preview of the signals the fraud engine will be given (debounced)
+  useEffect(() => {
+    if (!form.toAccount && !form.amount) { setSignals(null); return undefined; }
+    const q = new URLSearchParams({ toAccount: form.toAccount, amount: form.amount || '0', country: form.country });
+    const id = setTimeout(() => { api(`/transfer/signals?${q}`).then(setSignals).catch(() => setSignals(null)); }, 300);
+    return () => clearTimeout(id);
+  }, [form.toAccount, form.amount, form.country, last]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -649,6 +683,13 @@ function TransferTab({ data, flashMsg, reload }) {
           </div>
           <button className="btn" type="submit" disabled={busy}>{busy ? 'Processing…' : 'Send payment'}</button>
         </form>
+        <div className="sig-card">
+          <div className="sig-title">🔎 What the fraud check will see</div>
+          {signals
+            ? <SignalPreview s={signals} />
+            : <p className="faint" style={{ fontSize: 13, margin: 0 }}>Pick a payee and type an amount — the signals our fraud engine will measure appear here as you type.</p>}
+          <div className="card-hint">Computed by the server exactly as for the real payment. The risk score itself is only calculated when you send.</div>
+        </div>
       </div>
 
       <div className="card">
@@ -683,7 +724,22 @@ function TxnTab({ txns, loading }) {
   const [filter, setFilter] = useState('all');
   if (loading) return <div className="card"><p style={{ color: 'var(--text-dim)' }}>Loading…</p></div>;
   const shown = txns.filter((t) => filter === 'all' || t.status === filter);
+  const pick = (id) => {
+    setOpen(id);
+    setFilter((f) => (f === 'all' || txns.find((t) => t._id === id)?.status === f ? f : 'all'));
+    setTimeout(() => document.getElementById(`tx-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  };
   return (
+    <>
+    {txns.some((t) => t.fraudProbability != null) && (
+      <div className="card">
+        <div className="card-title">
+          <h3><span className="ico">🎯</span> Risk map</h3>
+          <span className="rmap-legend"><i style={{ background: 'var(--success)' }} />completed <i style={{ background: 'var(--warn)' }} />needs you <i style={{ background: 'var(--danger)' }} />blocked</span>
+        </div>
+        <RiskMap txns={shown} selected={open} onPick={pick} />
+      </div>
+    )}
     <div className="card">
       <div className="page-head row between" style={{ marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
         <div>
@@ -706,7 +762,7 @@ function TxnTab({ txns, loading }) {
             <tbody>
               {shown.map((t) => (
                 <React.Fragment key={t._id}>
-                  <tr onClick={() => setOpen(open === t._id ? null : t._id)} className={open === t._id ? 'sel' : ''}>
+                  <tr id={`tx-${t._id}`} onClick={() => setOpen(open === t._id ? null : t._id)} className={open === t._id ? 'sel' : ''}>
                     <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{new Date(t.createdAt).toLocaleString()}</td>
                     <td>{t.merchant || 'Transfer'} <span className="mono" style={{ marginLeft: 6 }}>{t.txId}</span></td>
                     <td className={`amount ${t.type === 'DEPOSIT' ? 'in' : ''}`}>{t.type === 'DEPOSIT' ? '+' : '−'}{money(t.amount)}</td>
@@ -724,6 +780,7 @@ function TxnTab({ txns, loading }) {
         </div>
       )}
     </div>
+    </>
   );
 }
 

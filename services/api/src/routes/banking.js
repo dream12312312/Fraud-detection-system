@@ -66,6 +66,46 @@ router.post('/beneficiaries', async (req, res) => {
   res.status(201).json(b);
 });
 
+/**
+ * The behavioural signals the fraud engine is given for a payment. `extra` is a
+ * payment that is not stored yet (the preview), so the numbers match what the
+ * real /transfer computes after it has created the transaction.
+ */
+async function riskSignals(user, { toAccount, country, extra }) {
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const [beneficiary, velocity, agg] = await Promise.all([
+    Beneficiary.findOne({ userId: user._id, accountNumber: String(toAccount) }),
+    Transaction.countDocuments({ userId: user._id, createdAt: { $gte: hourAgo } }),
+    Transaction.aggregate([
+      { $match: { userId: user._id, createdAt: { $gte: monthAgo } } },
+      { $group: { _id: null, sum: { $sum: '$amount' }, n: { $sum: 1 } } }
+    ])
+  ]);
+  const sum = (agg[0]?.sum || 0) + (extra || 0);
+  const n = (agg[0]?.n || 0) + (extra ? 1 : 0);
+  const homeCountry = user.homeCountry || 'US';
+  return {
+    beneficiary,
+    features: {
+      hourOfDay: new Date().getUTCHours(),
+      velocity1h: velocity + (extra ? 1 : 0),
+      avgAmount30d: n ? sum / n : extra || 0,
+      isNewBeneficiary: !beneficiary,
+      homeCountry,
+      isForeign: (country || homeCountry) !== homeCountry
+    }
+  };
+}
+
+// Live preview for the Send money form: the signals only, never the score, so the
+// form cannot be used to probe where the block threshold is.
+router.get('/transfer/signals', async (req, res) => {
+  const amt = Number(req.query.amount);
+  const { features } = await riskSignals(req.user, { toAccount: req.query.toAccount || '', country: req.query.country, extra: Number.isFinite(amt) && amt > 0 ? amt : 0 });
+  res.json({ ...features, amount: Number.isFinite(amt) ? amt : 0 });
+});
+
 router.post('/transfer', async (req, res) => {
   const received = performance.now();
   try {
@@ -77,14 +117,12 @@ router.post('/transfer', async (req, res) => {
     if (!from) return res.status(400).json({ error: 'No checking account found' });
     if (from.balance - from.heldAmount < amt) return res.status(400).json({ error: 'Insufficient available balance' });
 
-    const beneficiary = await Beneficiary.findOne({ userId: req.user._id, accountNumber: String(toAccount) });
     const tx = await Transaction.create({
       txId: newTxId(),
       userId: req.user._id,
       type: merchant ? 'PAYMENT' : 'TRANSFER',
       amount: amt,
       merchant,
-      beneficiaryId: beneficiary?._id,
       country: country || req.user.homeCountry || 'US',
       device: device || 'web',
       status: 'PENDING_RISK_CHECK'
@@ -96,23 +134,15 @@ router.post('/transfer', async (req, res) => {
 
     // ---- fraud scoring (hot path) ----
     // Real behavioral features instead of engine defaults: transactions in the
-    // last hour (velocity) and the user's 30-day average amount.
-    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const [velocity_1h, avgAgg] = await Promise.all([
-      Transaction.countDocuments({ userId: req.user._id, createdAt: { $gte: hourAgo } }),
-      Transaction.aggregate([
-        { $match: { userId: req.user._id, createdAt: { $gte: monthAgo } } },
-        { $group: { _id: null, avg: { $avg: '$amount' } } }
-      ])
-    ]);
-    const features = {
-      hourOfDay: tx.createdAt.getUTCHours(),
-      velocity1h: velocity_1h,
-      avgAmount30d: avgAgg[0]?.avg || amt,
-      isNewBeneficiary: !beneficiary,
-      homeCountry: req.user.homeCountry || 'US'
-    };
+    // last hour (velocity) and the user's 30-day average amount (both include
+    // this payment, which already exists).
+    const signals = await riskSignals(req.user, { toAccount, country: tx.country });
+    const { beneficiary } = signals;
+    const { isForeign, ...features } = signals.features;
+    features.hourOfDay = tx.createdAt.getUTCHours();
+    features.avgAmount30d = features.avgAmount30d || amt;
+    const velocity_1h = features.velocity1h;
+    tx.beneficiaryId = beneficiary?._id;
     tx.features = features;
     const scoreStart = performance.now();
     let decision = await scoreTransaction({
