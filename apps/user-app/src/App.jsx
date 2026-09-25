@@ -141,13 +141,13 @@ function AuthScreen({ onAuth }) {
 
 const NAV = [
   { group: 'Money', items: [
-    { id: 'overview', ico: '🏠', label: 'Overview', hint: 'Balances and recent activity' },
-    { id: 'transfer', ico: '💸', label: 'Send money', hint: 'Send money to a payee' },
-    { id: 'beneficiaries', ico: '👥', label: 'Payees', hint: 'Saved payees for faster, lower-risk transfers' }
+    { id: 'overview', a: '#7c9cff', sub: 'Balance & activity', ico: '🏠', label: 'Overview', hint: 'Balances and recent activity' },
+    { id: 'transfer', a: '#34d399', sub: 'Pay someone', ico: '💸', label: 'Send money', hint: 'Send money to a payee' },
+    { id: 'beneficiaries', a: '#a78bfa', sub: 'Saved people', ico: '👥', label: 'Payees', hint: 'Saved payees for faster, lower-risk transfers' }
   ] },
   { group: 'Activity & security', items: [
-    { id: 'transactions', ico: '🧾', label: 'Transactions', hint: 'History with how each payment was checked' },
-    { id: 'notifications', ico: '🔔', label: 'Alerts', hint: 'Security and account notifications' }
+    { id: 'transactions', a: '#38bdf8', sub: 'History & checks', ico: '🧾', label: 'Transactions', hint: 'History with how each payment was checked' },
+    { id: 'notifications', a: '#fbbf24', sub: 'Security notices', ico: '🔔', label: 'Alerts', hint: 'Security and account notifications' }
   ] }
 ];
 
@@ -162,11 +162,13 @@ function SideNav({ user, tab, setTab, unread, challenged, onLogout }) {
             <button
               key={t.id}
               className={`nav-item ${tab === t.id ? 'active' : ''}`}
+              style={{ '--a': t.a }}
               onClick={() => setTab(t.id)}
               title={t.hint}
               aria-label={`${t.label} — ${t.hint}`}
+              aria-current={tab === t.id ? 'page' : undefined}
             >
-              <span className="nav-ico">{t.ico}</span>{t.label}
+              <span className="nav-ico">{t.ico}</span><span className="nav-text"><span>{t.label}</span><small>{t.sub}</small></span>
               {t.id === 'notifications' && unread > 0 && <span className="nav-count" title={`${unread} unread notifications`}>{unread}</span>}
               {t.id === 'transactions' && challenged && <span className="nav-dot" title="A transaction needs your confirmation" />}
             </button>
@@ -288,6 +290,7 @@ function Shell({ user, onUser, onLogout }) {
   const [data, setData] = useState({ accounts: [], txns: [], notifs: [], beneficiaries: [] });
   const [loading, setLoading] = useState(true);
   const socketRef = useRef(null);
+  const [live, setLive] = useState(null); // real Socket.IO connection state; null until the first answer
   const now = useNow(30000); // re-render clock for "x ago" labels
 
   const load = useCallback(async () => {
@@ -311,6 +314,9 @@ function Shell({ user, onUser, onLogout }) {
     setSessionExpiredHandler(() => { clearSession(); onLogout(); });
     const socket = io('/', { withCredentials: true });
     socketRef.current = socket;
+    socket.on('connect', () => setLive(true));
+    socket.on('disconnect', () => setLive(false));
+    socket.on('connect_error', () => setLive(false));
     socket.emit('join', { userId: user.id });
     socket.on('transaction:update', () => { load(); });
     socket.on('notification:new', (n) => {
@@ -347,13 +353,15 @@ function Shell({ user, onUser, onLogout }) {
 
 
   return (
-    <div className="app-shell">
+    <div className="app-shell shell-user">
       <header className="topbar">
         <div className="topbar-brand"><span className="logo">🛡️</span> SentinelPay</div>
         <div className="topbar-user">
           <ThemeToggle />
-          <span className="status-dot ok" title="API connected" />
-          <span>Signed in as <b>{user.fullName || user.email}</b></span>
+          <span className="user-chip" title={live === false ? 'Live updates disconnected — reconnecting' : live ? 'Live updates connected' : 'Connecting…'}>
+            <span className="avatar">{(user.fullName || user.email).split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()}<i className={live ? 'ok' : live === false ? 'bad' : ''} /></span>
+            <span className="uc-txt"><b>{user.fullName || user.email}</b><small>{live ? 'Live updates on' : live === false ? 'Reconnecting…' : 'Connecting…'}</small></span>
+          </span>
           <button className="btn ghost sm" onClick={onLogout}>Sign out</button>
         </div>
       </header>
@@ -363,13 +371,15 @@ function Shell({ user, onUser, onLogout }) {
         <main className="main">
           <Flash flash={flash} onClose={clearFlash} />
 
-          {tab === 'overview' && (
-            <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} beneficiaries={data.beneficiaries} notifs={data.notifs} loading={loading} go={goTab} onReview={openReview} />
-          )}
-          {tab === 'transfer' && <TransferTab data={data} flashMsg={flashMsg} reload={load} onDecide={decide} />}
-          {tab === 'transactions' && <TxnTab txns={data.txns} loading={loading} onDecide={decide} focus={focus} />}
-          {tab === 'beneficiaries' && <BeneficiaryTab data={data} flashMsg={flashMsg} reload={load} />}
-          {tab === 'notifications' && <NotifTab notifs={data.notifs} reload={load} now={now} />}
+          <div className="page-in" key={tab}>
+            {tab === 'overview' && (
+              <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} beneficiaries={data.beneficiaries} notifs={data.notifs} loading={loading} go={goTab} onReview={openReview} />
+            )}
+            {tab === 'transfer' && <TransferTab data={data} flashMsg={flashMsg} reload={load} onDecide={decide} />}
+            {tab === 'transactions' && <TxnTab txns={data.txns} loading={loading} onDecide={decide} focus={focus} />}
+            {tab === 'beneficiaries' && <BeneficiaryTab data={data} flashMsg={flashMsg} reload={load} />}
+            {tab === 'notifications' && <NotifTab notifs={data.notifs} reload={load} now={now} />}
+          </div>
         </main>
       </div>
     </div>
@@ -524,7 +534,7 @@ function OverviewTab({ user, checking, savings, txns, beneficiaries, notifs, loa
                             <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{timeAgo(t.createdAt)}</td>
                             <td>{t.merchant || 'Transfer'} <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>{t.txId}</span></td>
                             <td className={`amount ${t.type === 'DEPOSIT' ? 'in' : ''}`}>{t.type === 'DEPOSIT' ? '+' : '−'}{money(t.amount)}</td>
-                            <td><span className={`badge ${t.status}`}>{t.status}</span></td>
+                            <td><span className={`badge ${t.status}`}>{t.status.replace(/_/g, " ")}</span></td>
                           </tr>
                         ))}
                       </tbody>
@@ -726,7 +736,7 @@ function TxnTab({ txns, loading, onDecide, focus }) {
                     <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{new Date(t.createdAt).toLocaleString()}</td>
                     <td>{t.merchant || 'Transfer'} <span className="mono" style={{ marginLeft: 6 }}>{t.txId}</span></td>
                     <td className={`amount ${t.type === 'DEPOSIT' ? 'in' : ''}`}>{t.type === 'DEPOSIT' ? '+' : '−'}{money(t.amount)}</td>
-                    <td><span className={`badge ${t.status}`}>{t.status}</span></td>
+                    <td><span className={`badge ${t.status}`}>{t.status.replace(/_/g, " ")}</span></td>
                     <td><RiskBadge level={t.riskLevel} prob={t.fraudProbability} /></td>
                     <td className="faint" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {t.status === 'CHALLENGED' && open !== t._id && (

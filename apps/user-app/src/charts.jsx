@@ -223,7 +223,7 @@ export function RiskMap({ txns, selected, onPick }) {
       </svg>
       <div className="rmap-foot">
         {h
-          ? <span><b>{money(h.amount)}</b> · {new Date(h.createdAt).toLocaleString()} · risk <b>{Math.round(h.fraudProbability * 100)}%</b> · <span className={`badge ${h.status}`}>{h.status}</span></span>
+          ? <span><b>{money(h.amount)}</b> · {new Date(h.createdAt).toLocaleString()} · risk <b>{Math.round(h.fraudProbability * 100)}%</b> · <span className={`badge ${h.status}`}>{h.status.replace(/_/g, " ")}</span></span>
           : <span className="faint">Each dot is one payment: height = risk score, size = amount, colour = outcome. Click a dot to open it.</span>}
       </div>
     </div>

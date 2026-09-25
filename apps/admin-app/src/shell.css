@@ -1,0 +1,149 @@
+/* ===== Signed-in shell: sidebar tabs, top bar, page transitions, status tags =====
+ * Shared by the user app and the admin console (same file in both apps).
+ * Loaded after theme.css so it wins over the older shell rules. */
+
+/* ---- sidebar: one deep gradient in both themes ---- */
+.side-nav {
+  background:
+    radial-gradient(280px 220px at 0% 0%, rgba(124, 92, 246, .22), transparent 70%),
+    radial-gradient(260px 260px at 100% 100%, rgba(56, 189, 248, .12), transparent 70%),
+    linear-gradient(185deg, #1a2a5e 0%, #16224a 45%, #111a38 100%);
+  border-right: none; box-shadow: 4px 0 24px rgba(20, 36, 90, .14);
+  padding: 16px 12px; gap: 0;
+}
+:root:not([data-theme="light"]) .side-nav {
+  background:
+    radial-gradient(280px 220px at 0% 0%, rgba(124, 92, 246, .18), transparent 70%),
+    radial-gradient(260px 260px at 100% 100%, rgba(56, 189, 248, .08), transparent 70%),
+    linear-gradient(185deg, #131f45 0%, #0f1834 50%, #0b1228 100%);
+  border-right: 1px solid rgba(255, 255, 255, .06);
+}
+.side-nav .nav-group { margin-bottom: 4px; }
+.side-nav .nav-group + .nav-group::before {
+  content: ''; display: block; height: 1px; margin: 6px 10px 10px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .14), transparent);
+}
+.side-nav .nav-label { color: #8da2d4; font-size: 10.5px; letter-spacing: .12em; margin: 2px 12px 8px; }
+
+.side-nav .nav-item {
+  --a: #7c9cff;
+  position: relative; gap: 11px; padding: 7px 10px; margin-bottom: 3px;
+  border-radius: 12px; font-size: 13.5px; color: #c8d3ee;
+  transition: background .18s, color .18s, border-color .18s, box-shadow .18s;
+}
+.side-nav .nav-ico {
+  width: 34px; height: 34px; flex-shrink: 0; display: grid; place-items: center; position: relative;
+  border-radius: 11px; font-size: 16px;
+  background: color-mix(in srgb, var(--a) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--a) 34%, transparent);
+  transition: transform .2s cubic-bezier(.3, 1.4, .5, 1), background .18s;
+}
+.side-nav .nav-text { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; white-space: normal; overflow: visible; }
+.side-nav .nav-text > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-nav .nav-text small { font-size: 11px; font-weight: 500; color: rgba(200, 211, 238, .58); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-nav .nav-item:hover { background: rgba(255, 255, 255, .07); color: #fff; }
+.side-nav .nav-item:hover .nav-ico { transform: scale(1.08) rotate(-5deg); background: color-mix(in srgb, var(--a) 32%, transparent); }
+.side-nav .nav-item:focus-visible { outline: 2px solid var(--a); outline-offset: 1px; }
+.side-nav .nav-item.active {
+  color: #fff; border-color: color-mix(in srgb, var(--a) 55%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--a) 40%, transparent), rgba(140, 90, 255, .26));
+  box-shadow: 0 6px 20px rgba(8, 16, 60, .38), inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+.side-nav .nav-item.active::before {
+  content: ''; position: absolute; left: -12px; top: 9px; bottom: 9px; width: 4px; border-radius: 0 4px 4px 0;
+  background: var(--a); box-shadow: 0 0 12px var(--a);
+}
+.side-nav .nav-item.active .nav-ico { background: rgba(255, 255, 255, .18); border-color: rgba(255, 255, 255, .32); }
+.side-nav .nav-item.active .nav-text small { color: rgba(255, 255, 255, .78); }
+.side-nav .nav-item .nav-count {
+  background: linear-gradient(135deg, #ff6b6b, #f43f5e); box-shadow: 0 0 0 0 rgba(244, 63, 94, .6);
+  animation: shellPing 2.2s infinite; min-width: 20px; text-align: center;
+}
+.side-nav .nav-item .nav-dot { width: 9px; height: 9px; background: var(--warn); box-shadow: 0 0 0 0 rgba(251, 191, 36, .6); animation: shellPingW 1.8s infinite; }
+
+.side-nav .side-user { background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .12); }
+.side-nav .side-user .who .name { color: #fff; }
+.side-nav .side-user .who .mail { color: #8da2d4; }
+.side-nav .avatar, .user-chip .avatar {
+  background: linear-gradient(135deg, #5b8cff, #9b6bff); border: 0; color: #fff; box-shadow: 0 4px 12px rgba(91, 140, 255, .35);
+}
+
+/* ---- top bar ---- */
+.topbar-brand .logo { transition: transform .3s; }
+.topbar-brand:hover .logo { transform: rotate(-8deg) scale(1.06); }
+.crumb { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; }
+.crumb-ico { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; font-size: 14px; flex-shrink: 0; background: color-mix(in srgb, var(--a, var(--primary)) 16%, transparent); border: 1px solid color-mix(in srgb, var(--a, var(--primary)) 35%, var(--border)); }
+.crumb em { font-style: normal; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
+.crumb span { margin: 0; }
+.user-chip {
+  display: inline-flex; align-items: center; gap: 9px; padding: 3px 12px 3px 3px; border-radius: 999px;
+  background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; max-width: 260px;
+}
+.user-chip .avatar { width: 30px; height: 30px; font-size: 11.5px; position: relative; }
+.user-chip .avatar i { position: absolute; right: -1px; bottom: -1px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--card); background: var(--text-faint); }
+.user-chip .avatar i.ok { background: var(--success); }
+.user-chip .avatar i.bad { background: var(--danger); }
+.user-chip .uc-txt { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.user-chip .uc-txt b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-chip .uc-txt small { font-size: 11px; color: var(--text-faint); }
+.status-dot.ok { box-shadow: 0 0 8px rgba(52, 211, 153, .7); }
+.status-dot.warn { box-shadow: 0 0 8px rgba(251, 191, 36, .7); }
+.status-dot.bad { box-shadow: 0 0 8px rgba(248, 113, 113, .7); }
+
+/* ---- page transition ---- */
+.page-in { animation: shellPage .32s cubic-bezier(.2, .8, .2, 1) backwards; } /* backwards: no transform left behind, so fixed modals inside stay viewport-anchored */
+
+/* ---- status tags ---- */
+.badge {
+  display: inline-flex; align-items: center; gap: 6px; font-weight: 700; letter-spacing: .02em;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent); white-space: nowrap;
+}
+.badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.badge.CHALLENGED::before, .badge.PENDING_RISK_CHECK::before, .badge.PENDING::before { animation: shellBlink 1.4s infinite; }
+.tag { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); letter-spacing: .02em; }
+
+@keyframes shellPage { from { opacity: 0; transform: translateY(8px); } }
+@keyframes shellPing { 0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, .55); } 70% { box-shadow: 0 0 0 7px rgba(244, 63, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); } }
+@keyframes shellPingW { 0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, .6); } 70% { box-shadow: 0 0 0 7px rgba(251, 191, 36, 0); } 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); } }
+@keyframes shellBlink { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) {
+  .page-in, .side-nav .nav-count, .side-nav .nav-dot, .badge::before { animation: none !important; }
+  .side-nav .nav-item:hover .nav-ico { transform: none; }
+}
+
+/* ---- phones ---- */
+@media (max-width: 1280px) { .crumb em { display: none; } }
+@media (max-width: 1080px) { .crumb { display: none; } }
+@media (max-width: 860px) {
+  /* admin: the sidebar is a slide-in drawer (console.css) — keep the gradient */
+  .shell-admin .side-nav { background: linear-gradient(185deg, #1a2a5e 0%, #16224a 45%, #111a38 100%); }
+  .shell-admin .user-chip { display: none; }
+
+  /* user app: sidebar becomes a bottom tab bar */
+  .shell-user .side-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 40; width: auto; height: auto;
+    flex-direction: row; justify-content: space-around; align-items: stretch; overflow: visible;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid rgba(255, 255, 255, .1);
+    box-shadow: 0 -8px 24px rgba(8, 16, 60, .28); background: linear-gradient(180deg, #16224a, #0f1834);
+  }
+  .shell-user .side-nav .nav-group { display: contents; }
+  .shell-user .side-nav .nav-group + .nav-group::before, .shell-user .side-nav .nav-label, .shell-user .side-nav .side-foot { display: none; }
+  .shell-user .side-nav .nav-item {
+    flex: 1 1 0; min-width: 0; width: auto; flex-direction: column; gap: 3px; padding: 5px 2px; margin: 0;
+    font-size: 11px; text-align: center; border-radius: 12px;
+  }
+  .shell-user .side-nav .nav-item.active { box-shadow: none; }
+  .shell-user .side-nav .nav-item.active::before { left: 25%; right: 25%; top: -7px; bottom: auto; width: auto; height: 3px; border-radius: 0 0 3px 3px; }
+  .shell-user .side-nav .nav-ico { width: 30px; height: 30px; font-size: 15px; }
+  .shell-user .side-nav .nav-text { align-items: center; width: 100%; }
+  .shell-user .side-nav .nav-text small { display: none; }
+  .shell-user .side-nav .nav-count, .shell-user .side-nav .nav-dot { position: absolute; top: 1px; left: calc(50% + 8px); margin: 0; font-size: 10px; padding: 0 5px; }
+  .shell-user .main { padding-bottom: 96px; }
+  .user-chip .uc-txt small { display: none; }
+}
+@media (max-width: 600px) {
+  .topbar-user > span.user-chip.user-chip { display: inline-flex; } /* beats theme.css hide rule */
+  .shell-admin .topbar-user > span.user-chip.user-chip { display: none; } /* the drawer already shows the account */
+  .user-chip { padding: 3px; border-radius: 50%; }
+  .user-chip .uc-txt { display: none; }
+}

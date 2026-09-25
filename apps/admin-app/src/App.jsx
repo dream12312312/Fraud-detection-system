@@ -77,20 +77,20 @@ function Login({ onAuth }) {
 /* ---------- navigation ---------- */
 
 const NAV = [
-  { group: 'Overview', items: [{ id: 'overview', ico: '🏠', label: 'Overview', hint: 'The platform in one screen' }] },
+  { group: 'Overview', items: [{ id: 'overview', a: '#7c9cff', sub: 'Platform at a glance', ico: '🏠', label: 'Overview', hint: 'The platform in one screen' }] },
   { group: 'Operations', items: [
-    { id: 'transactions', ico: '💳', label: 'Transactions', hint: 'Payments, fraud decisions and processing paths' },
-    { id: 'users', ico: '👥', label: 'Users & money', hint: 'Approve, edit, credit/debit, limits, access' },
-    { id: 'interactions', ico: '🗃️', label: 'User interactions', hint: 'What people did: sign-ins, payments, answers, page views (separate database)' }
+    { id: 'transactions', a: '#38bdf8', sub: 'Payments & decisions', ico: '💳', label: 'Transactions', hint: 'Payments, fraud decisions and processing paths' },
+    { id: 'users', a: '#a78bfa', sub: 'Approve, credit, limits', ico: '👥', label: 'Users & money', hint: 'Approve, edit, credit/debit, limits, access' },
+    { id: 'interactions', a: '#f472b6', sub: 'What people did', ico: '🗃️', label: 'User interactions', hint: 'What people did: sign-ins, payments, answers, page views (separate database)' }
   ] },
   { group: 'Data engineering', items: [
-    { id: 'architecture', ico: '🧭', label: 'Live data flow (3D)', hint: 'Every payment and pipeline run moving through the platform, live' },
-    { id: 'pipeline', ico: '🌊', label: 'Data pipeline', hint: 'Landing → Bronze → Silver → Gold' },
-    { id: 'training', ico: '🧠', label: 'Model training', hint: 'Choose a model + dataset, train on Databricks, compare' }
+    { id: 'architecture', a: '#fbbf24', sub: '3D, in real time', ico: '🧭', label: 'Live data flow (3D)', hint: 'Every payment and pipeline run moving through the platform, live' },
+    { id: 'pipeline', a: '#22d3ee', sub: 'Bronze → Silver → Gold', ico: '🌊', label: 'Data pipeline', hint: 'Landing → Bronze → Silver → Gold' },
+    { id: 'training', a: '#f87171', sub: 'Train & compare models', ico: '🧠', label: 'Model training', hint: 'Choose a model + dataset, train on Databricks, compare' }
   ] },
   { group: 'Platform', items: [
-    { id: 'databricks', ico: '🧱', label: 'Databricks', hint: 'Workspace set-up, jobs and resources' },
-    { id: 'system', ico: '📡', label: 'System health', hint: 'Every service, checked live' }
+    { id: 'databricks', a: '#fb923c', sub: 'Workspace & jobs', ico: '🧱', label: 'Databricks', hint: 'Workspace set-up, jobs and resources' },
+    { id: 'system', a: '#34d399', sub: 'Live service checks', ico: '📡', label: 'System health', hint: 'Every service, checked live' }
   ] }
 ];
 const ALL_TABS = NAV.flatMap((g) => g.items);
@@ -134,20 +134,27 @@ function Dashboard({ user, onLogout }) {
 
   const count = { users: badges.stats?.pendingUsers, transactions: badges.stats?.challenged };
   const current = ALL_TABS.find((t) => t.id === tab);
+  const group = NAV.find((g) => g.items.includes(current))?.group;
   const props = { flash: showFlash, go: setTab, liveFeed };
 
   return (
-    <div className="app-shell">
+    <div className="app-shell shell-admin">
       <header className="topbar">
         <div className="row" style={{ gap: 10 }}>
           <button className="nav-toggle" onClick={() => setNavOpen((v) => !v)} aria-label="Menu">☰</button>
           <div className="topbar-brand"><span className="logo">🛡️</span> SentinelPay <span className="brand-sub">Developer console</span></div>
         </div>
-        <div className="crumb">{NAV.find((g) => g.items.includes(current))?.group} <span>›</span> <b>{current?.label}</b></div>
+        <div className="crumb" style={{ '--a': current?.a }}>
+          <span className="crumb-ico">{current?.ico}</span>
+          {group !== current?.label && <>{group} <span>›</span></>} <b>{current?.label}</b> <em>· {current?.hint}</em>
+        </div>
         <div className="topbar-user">
           <span className="live-pill" title="Live transaction stream (Socket.IO)"><span className="dot pulse" /> live</span>
           <ThemeToggle />
-          <span className="hide-sm">{user.email}</span>
+          <span className="user-chip hide-sm" title={user.email}>
+            <span className="avatar">{(user.fullName || user.email).slice(0, 2).toUpperCase()}</span>
+            <span className="uc-txt"><b>{user.fullName || 'Admin'}</b><small>{user.email}</small></span>
+          </span>
           <button className="btn ghost sm" onClick={() => { setSession(null, null); onLogout(); }}>Sign out</button>
         </div>
       </header>
@@ -159,8 +166,8 @@ function Dashboard({ user, onLogout }) {
             <div key={g.group} className="nav-group">
               <div className="nav-label">{g.group}</div>
               {g.items.map((t) => (
-                <button key={t.id} className={`nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)} title={t.hint}>
-                  <span className="nav-ico">{t.ico}</span><span className="nav-text">{t.label}</span>
+                <button key={t.id} className={`nav-item ${tab === t.id ? 'active' : ''}`} style={{ '--a': t.a }} onClick={() => setTab(t.id)} title={t.hint} aria-current={tab === t.id ? 'page' : undefined}>
+                  <span className="nav-ico">{t.ico}</span><span className="nav-text"><span>{t.label}</span><small>{t.sub}</small></span>
                   {count[t.id] > 0 && <span className="nav-count" title={t.id === 'users' ? 'users awaiting approval' : 'payments waiting for confirmation'}>{count[t.id]}</span>}
                 </button>
               ))}
@@ -185,15 +192,17 @@ function Dashboard({ user, onLogout }) {
               <button className="x" onClick={clearFlash} aria-label="Dismiss">✕</button>
             </div>
           )}
-          {tab === 'overview' && <OverviewPage {...props} />}
-          {tab === 'transactions' && <TransactionsPage {...props} />}
-          {tab === 'users' && <UsersPage {...props} />}
-          {tab === 'interactions' && <InteractionsPage {...props} />}
-          {tab === 'architecture' && <ArchitectureTab lastEvent={liveFeed.find((e) => !e._alert)} />}
-          {tab === 'pipeline' && <PipelinePage {...props} />}
-          {tab === 'training' && <TrainingPage {...props} />}
-          {tab === 'databricks' && <DatabricksPage {...props} />}
-          {tab === 'system' && <SystemPage {...props} />}
+          <div className="page-in" key={tab}>
+            {tab === 'overview' && <OverviewPage {...props} />}
+            {tab === 'transactions' && <TransactionsPage {...props} />}
+            {tab === 'users' && <UsersPage {...props} />}
+            {tab === 'interactions' && <InteractionsPage {...props} />}
+            {tab === 'architecture' && <ArchitectureTab lastEvent={liveFeed.find((e) => !e._alert)} />}
+            {tab === 'pipeline' && <PipelinePage {...props} />}
+            {tab === 'training' && <TrainingPage {...props} />}
+            {tab === 'databricks' && <DatabricksPage {...props} />}
+            {tab === 'system' && <SystemPage {...props} />}
+          </div>
         </main>
       </div>
     </div>
