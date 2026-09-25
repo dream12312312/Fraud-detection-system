@@ -195,7 +195,13 @@ export function RiskMap({ txns, selected, onPick }) {
   const t0 = Math.min(...times); const t1 = Math.max(...times); const span = Math.max(t1 - t0, 60000);
   const maxAmt = Math.max(...pts.map((t) => Number(t.amount || 0)), 1);
   const W = 800; const H = 200; const L = 34; const B = 20;
-  const x = (t) => L + 8 + ((new Date(t.createdAt).getTime() - t0) / span) * (W - L - 16);
+  // Payments made within the same hour would sit on one vertical line, so then
+  // they are spread out in the order they were made (the axis says so).
+  const byOrder = t1 - t0 < 3600000;
+  const order = [...pts].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).map((t) => t._id);
+  const x = (t) => L + 22 + (byOrder
+    ? (pts.length > 1 ? order.indexOf(t._id) / (pts.length - 1) : 0.5)
+    : (new Date(t.createdAt).getTime() - t0) / span) * (W - L - 44);
   const y = (p) => 6 + (1 - p) * (H - B - 6);
   const r = (a) => 4 + Math.sqrt(Number(a || 0) / maxAmt) * 10;
   const h = pts.find((t) => t._id === hover);
@@ -210,9 +216,9 @@ export function RiskMap({ txns, selected, onPick }) {
         {[0, REVIEW_AT, BLOCK_AT, 1].map((v) => <text key={v} x={L - 5} y={y(v) + 4} className="tick end">{Math.round(v * 100)}%</text>)}
         <text x={W - 6} y={y(1) + 14} className="band-l end">blocked</text>
         <text x={W - 6} y={y(BLOCK_AT) + 14} className="band-l end">you confirm</text>
-        <text x={W - 6} y={H - 6} className="band-l end">approved</text>
-        <text x={L + 4} y={H - 4} className="tick start">{fmt(t0)}</text>
-        <text x={W - 6} y={H - 4} className="tick end">{fmt(t1)}</text>
+        <text x={W - 6} y={y(REVIEW_AT) + 14} className="band-l end">approved</text>
+        <text x={L + 4} y={H - 4} className="tick start">{byOrder ? `${fmt(t0)} · oldest` : fmt(t0)}</text>
+        <text x={W - 6} y={H - 4} className="tick end">{byOrder ? 'newest · spread by order' : fmt(t1)}</text>
         {pts.map((t) => (
           <circle key={t._id} cx={x(t)} cy={y(t.fraudProbability)} r={r(t.amount)} fill={STATUS_COLOR[t.status] || 'var(--info)'}
             className={`dot ${selected === t._id ? 'sel' : ''} ${hover === t._id ? 'hov' : ''}`}
