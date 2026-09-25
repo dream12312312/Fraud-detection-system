@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { User, Account } from '../models.js';
 import { signAccessToken, signRefreshToken, verifyToken, requireAuth } from '../auth.js';
+import { track } from '../interactions.js';
 
 const router = Router();
 
@@ -16,6 +17,7 @@ router.post('/register', async (req, res) => {
     const user = await User.create({ email: String(email).toLowerCase(), passwordHash, fullName, status: 'PENDING' });
     const accountNumber = `SPY-${String(user._id).slice(-6).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const account = await Account.create({ userId: user._id, accountNumber, balance: 5000 });
+    track({ category: 'auth', type: 'auth.registered', userId: user._id, role: 'user' });
     res.status(201).json({
       id: user._id, email: user.email, fullName: user.fullName, status: user.status,
       accountNumber: account.accountNumber,
@@ -33,13 +35,17 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email: String(email).toLowerCase() });
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    const who = { userId: user._id, role: user.role === 'admin' ? 'admin' : 'user', sessionId: req.get('x-session-id') };
+    // a wrong password on a real account is worth keeping (brute force, account takeover)
+    if (!ok) { track({ ...who, category: 'auth', type: 'auth.login_failed', props: { reason: 'wrong_password' } }); return res.status(401).json({ error: 'Invalid credentials' }); }
+    if (user.status !== 'ACTIVE') track({ ...who, category: 'auth', type: 'auth.login_failed', props: { reason: `account_${String(user.status).toLowerCase()}` } });
     if (user.status === 'PENDING') return res.status(403).json({ error: 'Your account is pending approval. An administrator must approve it before you can sign in.' });
     if (user.status === 'BLOCKED') return res.status(403).json({ error: 'Your account has been blocked. Please contact support.' });
     if (user.status === 'DISABLED') return res.status(403).json({ error: 'Your account has been disabled. Please contact support.' });
     if (user.status !== 'ACTIVE') return res.status(403).json({ error: `Account ${user.status}` });
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user);
+    track({ ...who, category: 'auth', type: 'auth.login', props: { mustChangePassword: Boolean(user.mustChangePassword) } });
     // mustChangePassword tells the client to force a password change before any
     // banking action (set when an admin assigns a temporary password).
     res.json({ accessToken, refreshToken, user: { id: user._id, email: user.email, fullName: user.fullName, role: user.role, status: user.status, mustChangePassword: Boolean(user.mustChangePassword) } });

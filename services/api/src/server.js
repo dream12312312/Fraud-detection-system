@@ -11,6 +11,8 @@ import { signAccessToken } from './auth.js';
 import authRoutes from './routes/auth.js';
 import bankingRoutes from './routes/banking.js';
 import adminRoutes from './routes/admin.js';
+import interactionRoutes, { adminInteractionRoutes } from './routes/interactions.js';
+import { connectInteractions } from './interactions.js';
 
 const app = express();
 app.use(helmet());
@@ -20,6 +22,8 @@ app.use(morgan('dev'));
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'sentinelpay-api', time: new Date().toISOString(), uptime_s: Math.round(process.uptime()) }));
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/interactions', interactionRoutes);
+app.use('/api/v1/admin/interactions', adminInteractionRoutes);
 app.use('/api/v1', bankingRoutes);
 app.use('/api/v1/admin', adminRoutes);
 
@@ -90,6 +94,8 @@ async function start() {
   // discovered as a confusing duplicate-key error at registration time.
   const { User, Account, Transaction, Beneficiary, Notification } = await import('./models.js');
   await Promise.all([User.syncIndexes(), Account.syncIndexes(), Transaction.syncIndexes(), Beneficiary.syncIndexes(), Notification.syncIndexes()]);
+  // the interaction store is optional: if it cannot connect, the bank still runs
+  await connectInteractions();
   const admin = await seedAdmin();
   if (!(await Account.findOne({ userId: admin._id }))) {
     await Account.create({ userId: admin._id, accountNumber: 'SPY-ADMIN-001', balance: 100000 });

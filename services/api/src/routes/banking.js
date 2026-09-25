@@ -1,10 +1,11 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { User, Account, Beneficiary, Transaction, Notification } from '../models.js';
 import { requireAuth } from '../auth.js';
 import { scoreTransaction, fallbackRules } from '../fraudClient.js';
 import { TOPICS, publish } from '../kafka.js';
 import { transactionEvent } from '../lakehouse.js';
+import { trackReq } from '../interactions.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -49,7 +50,8 @@ router.get('/notifications', async (req, res) => {
 });
 
 router.post('/notifications/:id/read', async (req, res) => {
-  await Notification.findOneAndUpdate({ _id: req.params.id, userId: req.user._id }, { read: true });
+  const n = await Notification.findOneAndUpdate({ _id: req.params.id, userId: req.user._id }, { read: true });
+  if (n) trackReq(req, { category: 'alert', type: 'alert.read', target: String(n._id), props: { alertType: n.type } });
   res.json({ ok: true });
 });
 
@@ -63,6 +65,7 @@ router.post('/beneficiaries', async (req, res) => {
   if (!nickname || !accountNumber) return res.status(400).json({ error: 'nickname and accountNumber required' });
   const b = await Beneficiary.create({ userId: req.user._id, nickname, accountNumber, bankName });
   await notify(req, req.user._id, 'Beneficiary added', `${nickname} was added to your payees.`, 'INFO');
+  trackReq(req, { category: 'beneficiary', type: 'beneficiary.added', target: String(b._id), props: { hasBank: Boolean(bankName) } });
   res.status(201).json(b);
 });
 
@@ -190,6 +193,10 @@ router.post('/transfer', async (req, res) => {
     tx.timings = { scoreMs, totalMs: Math.round(performance.now() - received) };
     await tx.save();
     emitTx(req, tx, req.user._id);
+    trackReq(req, {
+      category: 'payment', type: 'payment.submitted', txId: tx.txId,
+      props: { amount: amt, country: tx.country, type: tx.type, status: tx.status, decision: tx.decision, fraudProbability: tx.fraudProbability, reasons: tx.reasons, decisionSource: tx.decisionSource, isNewBeneficiary: features.isNewBeneficiary, velocity1h: features.velocity1h, totalMs: tx.timings.totalMs }
+    });
 
     await publish(TOPICS.raw, tx.txId, transactionEvent(tx, { source: 'kafka' }));
     await publish(TOPICS.status, tx.txId, { event: 'transaction.status', transaction_id: tx.txId, status: tx.status });
@@ -219,6 +226,7 @@ router.post('/transactions/:txId/confirm', async (req, res) => {
     if (from) { from.heldAmount = Math.max(0, from.heldAmount - tx.amount); await from.save(); }
     await tx.save();
     await notify(req, req.user._id, 'Payment failed', `${tx.txId} could not be completed: insufficient balance.`, 'WARNING');
+    trackReq(req, { category: 'decision', type: 'decision.confirmed', txId: tx.txId, label: 'legit', props: { amount: tx.amount, fraudProbability: tx.fraudProbability, reasons: tx.reasons, result: 'FAILED_INSUFFICIENT_BALANCE' } });
     return res.json({ txId: tx.txId, status: tx.status });
   }
   from.balance -= tx.amount;
@@ -226,6 +234,8 @@ router.post('/transactions/:txId/confirm', async (req, res) => {
   await from.save();
   tx.status = 'COMPLETED'; await tx.save();
   await notify(req, req.user._id, 'Transaction confirmed', `${tx.txId} completed after your confirmation.`, 'SUCCESS');
+  // the customer says "this was me": a real 'legit' label for a flagged payment
+  trackReq(req, { category: 'decision', type: 'decision.confirmed', txId: tx.txId, label: 'legit', props: { amount: tx.amount, fraudProbability: tx.fraudProbability, reasons: tx.reasons, secondsToAnswer: Math.round((Date.now() - tx.createdAt) / 1000), result: 'COMPLETED' } });
   res.json({ txId: tx.txId, amount: tx.amount, status: tx.status });
 });
 
@@ -241,6 +251,8 @@ router.post('/transactions/:txId/report', async (req, res) => {
   const from = await Account.findOne({ userId: req.user._id, type: 'CHECKING' });
   if (from) { from.heldAmount = Math.max(0, from.heldAmount - tx.amount); await from.save(); }
   await notify(req, req.user._id, 'Fraud reported', `Transaction ${tx.txId} was blocked. Our team will contact you.`, 'FRAUD_ALERT');
+  // the customer says "this was not me": a real 'fraud' label
+  trackReq(req, { category: 'decision', type: 'decision.reported', txId: tx.txId, label: 'fraud', props: { amount: tx.amount, fraudProbability: tx.fraudProbability, reasons: tx.reasons, secondsToAnswer: Math.round((Date.now() - tx.createdAt) / 1000) } });
   res.json({ txId: tx.txId, status: tx.status });
 });
 

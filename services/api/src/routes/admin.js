@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { User, Account, Beneficiary, Transaction, Notification, TrainingRun } from '../models.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import { trackReq, interactionModel, interactionsReady, interactionsInfo } from '../interactions.js';
 import { config } from '../config.js';
 import {
   databricksSnapshot, medallionCounts, listMlflowExperiments, listMlflowRuns,
@@ -108,8 +109,11 @@ router.delete('/users/:id', async (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found' });
   await Promise.all([
     Account.deleteMany({ userId: user._id }), Beneficiary.deleteMany({ userId: user._id }),
-    Transaction.deleteMany({ userId: user._id }), Notification.deleteMany({ userId: user._id })
+    Transaction.deleteMany({ userId: user._id }), Notification.deleteMany({ userId: user._id }),
+    // their behaviour history goes with them (right to be forgotten)
+    interactionsReady() ? interactionModel().deleteMany({ userId: String(user._id) }) : null
   ]);
+  trackReq(req, { category: 'admin', type: 'admin.user_deleted', target: String(user._id) });
   await user.deleteOne();
   console.log(`[admin] ${req.user.email} deleted user ${user.email}`);
   res.json({ ok: true });
@@ -193,6 +197,7 @@ router.post('/transactions/:txId/resolve', async (req, res) => {
   await Notification.create({ userId: tx.userId, title: action === 'approve' ? 'Payment approved' : 'Payment blocked',
     body: `${tx.txId} ($${tx.amount.toFixed(2)}) was ${action === 'approve' ? 'approved' : 'blocked'} by our fraud team.`, type: action === 'approve' ? 'SUCCESS' : 'FRAUD_ALERT' });
   emitUserUpdate(req, tx.userId, { txId: tx.txId, status: tx.status });
+  trackReq(req, { category: 'admin', type: action === 'approve' ? 'admin.payment_approved' : 'admin.payment_blocked', txId: tx.txId, target: String(tx.userId), props: { amount: tx.amount, fraudProbability: tx.fraudProbability } });
   res.json(tx);
 });
 
@@ -209,6 +214,7 @@ router.patch('/users/:id/status', async (req, res) => {
   const user = await User.findByIdAndUpdate(req.params.id, { status }, { new: true }).select('-passwordHash');
   if (!user) return res.status(404).json({ error: 'User not found' });
   await Notification.create({ userId: user._id, title: 'Account update', body: `Your account status changed to ${status}.`, type: status === 'ACTIVE' ? 'INFO' : 'WARNING' });
+  trackReq(req, { category: 'admin', type: 'admin.user_status_changed', target: String(user._id), props: { status } });
   res.json(user);
 });
 
@@ -306,6 +312,7 @@ router.get('/system', async (_req, res) => {
       Transaction.countDocuments({ status: 'CHALLENGED' }),
       Notification.countDocuments({ type: 'FRAUD_ALERT' })
     ]);
+    out.interactions = interactionsInfo();
     out.counts = { users, pendingUsers, activeUsers, blockedUsers, totalTx, blockedTx, challengedTx, fraudAlerts };
   } catch { /* counts stay empty if the db hiccups */ }
   res.json(out);

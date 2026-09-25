@@ -241,11 +241,39 @@ Admin console → **Users & money** → click a user:
 - **Create user** makes an approved account with an opening balance and a
   one-time temporary password.
 
+## User interactions (separate database)
+
+Everything people do is also written to a **separate MongoDB database**,
+`sentinelpay_interactions` (collection `interactions`), so it can be analysed,
+exported or wiped without touching the bank's data. If that database is down,
+banking keeps working and the events are simply counted as "dropped".
+
+| Recorded by | Events |
+|---|---|
+| the server (trusted) | `auth.registered`, `auth.login`, `auth.login_failed`, `payment.submitted` (amount, country, decision, risk, reasons), `decision.confirmed` / `decision.reported`, `beneficiary.added`, `alert.read`, `admin.*` (approve/block payment, user status, user deleted, export, delete) |
+| the customer app | `page.view` (which tab), `ui.payment_details`, `ui.review_open`; only `page.*` and `ui.*` types are accepted from an app, max 50 per batch and 300 per minute per person |
+
+- **Training labels:** a customer's answer to a flagged payment is stored with
+  `label: legit` ("Yes, it was me") or `label: fraud` ("Not me") and the
+  payment's `txId`, ready to be joined with the lakehouse for future retraining.
+- **Privacy:** keys that look like passwords, tokens or card data are dropped,
+  and values are kept short. Deleting a user also deletes their events.
+- **Session:** every request carries an `X-Session-Id`, so one visit's page
+  views, payments and answers can be read as one timeline.
+
+Admin console → **User interactions**: database status and size, events per
+day, breakdown by kind (click to filter), answers-as-labels, most common events
+and most active people, an event explorer with a detail drawer, **CSV / JSON
+Lines export** of the current filter, and clean-up (delete events older than N
+days, or every event of one person). API: `GET /api/v1/admin/interactions`,
+`/stats`, `/export`, `DELETE /api/v1/admin/interactions`.
+
 ## Environment variables (.env)
 
 | Key | Purpose |
 |---|---|
 | MONGODB_URI | Mongo connection string |
+| INTERACTIONS_MONGODB_URI | optional: where the interaction database lives (default: same server, database `sentinelpay_interactions`) |
 | PORT | API port (4000) |
 | JWT_SECRET / JWT_EXPIRES_IN / REFRESH_TOKEN_DAYS | auth tokens |
 | CORS_ORIGINS | allowed frontends |

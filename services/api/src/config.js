@@ -3,6 +3,8 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 4000),
   mongoUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/sentinelpay',
+  // separate database for user-interaction events (defaults to the same server, db "sentinelpay_interactions")
+  interactionsMongoUri: process.env.INTERACTIONS_MONGODB_URI || '',
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '15m',
   refreshTokenDays: Number(process.env.REFRESH_TOKEN_DAYS || 7),

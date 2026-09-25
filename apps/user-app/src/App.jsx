@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
-import { api, saveSession, clearSession, verifySession, setAccessToken, setSessionExpiredHandler, useNow } from './lib.js';
+import { api, saveSession, clearSession, verifySession, setAccessToken, setSessionExpiredHandler, useNow, track } from './lib.js';
 import { PaymentJourney, ProtectionStrip } from './journey.jsx';
 import { ShieldArt, PipelineArt } from './illustrations.jsx';
 import { ThemeToggle } from './theme.jsx';
@@ -304,6 +304,7 @@ function Shell({ user, onUser, onLogout }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { track('page.view', tab); }, [tab]);
 
   // live updates over socket.io
   useEffect(() => {
@@ -325,7 +326,7 @@ function Shell({ user, onUser, onLogout }) {
   const goTab = (t) => { setFocus(null); setTab(t); };
   const reviewing = data.txns.find((t) => t.status === 'CHALLENGED');
   // "Review" opens the payment itself in Transactions, where its verdict carries the answer buttons
-  const openReview = (tx) => { const t = tx?.txId ? tx : reviewing; if (t) { setFocus(t._id); setTab('transactions'); } };
+  const openReview = (tx) => { const t = tx?.txId ? tx : reviewing; if (t) { track('ui.review_open', tab, { from: tx?.txId ? 'alert' : 'banner' }, t.txId); setFocus(t._id); setTab('transactions'); } };
 
   // the customer's answer to a payment the fraud engine sent for confirmation
   const decide = async (tx, kind) => {
@@ -721,7 +722,7 @@ function TxnTab({ txns, loading, onDecide, focus }) {
             <tbody>
               {shown.map((t) => (
                 <React.Fragment key={t._id}>
-                  <tr id={`tx-${t._id}`} onClick={() => setOpen(open === t._id ? null : t._id)} className={open === t._id ? 'sel' : ''}>
+                  <tr id={`tx-${t._id}`} onClick={() => { if (open !== t._id) track('ui.payment_details', 'transactions', { status: t.status }, t.txId); setOpen(open === t._id ? null : t._id); }} className={open === t._id ? 'sel' : ''}>
                     <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{new Date(t.createdAt).toLocaleString()}</td>
                     <td>{t.merchant || 'Transfer'} <span className="mono" style={{ marginLeft: 6 }}>{t.txId}</span></td>
                     <td className={`amount ${t.type === 'DEPOSIT' ? 'in' : ''}`}>{t.type === 'DEPOSIT' ? '+' : '−'}{money(t.amount)}</td>

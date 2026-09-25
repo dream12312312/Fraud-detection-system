@@ -17,7 +17,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   try {
     res = await fetch(`${API}/api/v1${path}`, {
       method,
-      headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+      headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId(), ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
       body: body ? JSON.stringify(body) : undefined
     });
   } catch (err) {
@@ -67,6 +67,7 @@ export function saveSession(login) {
 }
 
 export function clearSession() {
+  flushInteractions();
   localStorage.removeItem('token');
   localStorage.removeItem('refreshToken');
   localStorage.removeItem('user');
@@ -104,4 +105,48 @@ export function useNow(intervalMs = 0) {
     return () => clearInterval(t);
   }, [intervalMs]);
   return now;
+}
+
+/* ---------- interaction tracking ---------- */
+// Page views and clicks are queued and sent in small batches to the API, which
+// stores them in the separate interaction database. Payments, answers and
+// sign-ins are recorded by the server itself, so they are not sent from here.
+// Only ids and small flags go in `props`, never amounts typed into forms or
+// personal details.
+
+let sid = null;
+export function sessionId() {
+  if (sid) return sid;
+  try { sid = sessionStorage.getItem('sp-sid'); } catch { /* storage blocked */ }
+  if (!sid) {
+    sid = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0, 36);
+    try { sessionStorage.setItem('sp-sid', sid); } catch { /* storage blocked */ }
+  }
+  return sid;
+}
+
+let queue = [];
+let timer = null;
+
+export function track(type, target, props, txId) {
+  if (!accessToken) return;
+  queue.push({ type, target, props, txId, ts: new Date().toISOString(), sessionId: sessionId() });
+  if (queue.length >= 20) flushInteractions();
+  else if (!timer) timer = setTimeout(flushInteractions, 5000);
+}
+
+export function flushInteractions() {
+  clearTimeout(timer); timer = null;
+  if (!queue.length || !accessToken) { queue = []; return; }
+  const events = queue.splice(0, 50);
+  // keepalive lets the last batch leave even while the tab is closing
+  fetch(`${API}/api/v1/interactions`, {
+    method: 'POST', keepalive: true,
+    headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId(), Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ app: 'user-app', events })
+  }).catch(() => { /* analytics must never disturb the user */ });
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushInteractions(); });
 }

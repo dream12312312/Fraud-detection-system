@@ -10,6 +10,7 @@ import PipelinePage from './pages/PipelinePage.jsx';
 import TrainingPage from './pages/TrainingPage.jsx';
 import DatabricksPage from './pages/DatabricksPage.jsx';
 import SystemPage from './pages/SystemPage.jsx';
+import InteractionsPage from './pages/InteractionsPage.jsx';
 import { ShieldArt } from './illustrations.jsx';
 import { ThemeToggle } from './theme.jsx';
 import { AuthBackdrop } from './authbg.jsx';
@@ -79,7 +80,8 @@ const NAV = [
   { group: 'Overview', items: [{ id: 'overview', ico: '🏠', label: 'Overview', hint: 'The platform in one screen' }] },
   { group: 'Operations', items: [
     { id: 'transactions', ico: '💳', label: 'Transactions', hint: 'Payments, fraud decisions and processing paths' },
-    { id: 'users', ico: '👥', label: 'Users & money', hint: 'Approve, edit, credit/debit, limits, access' }
+    { id: 'users', ico: '👥', label: 'Users & money', hint: 'Approve, edit, credit/debit, limits, access' },
+    { id: 'interactions', ico: '🗃️', label: 'User interactions', hint: 'What people did: sign-ins, payments, answers, page views (separate database)' }
   ] },
   { group: 'Data engineering', items: [
     { id: 'architecture', ico: '🧭', label: 'Live data flow (3D)', hint: 'Every payment and pipeline run moving through the platform, live' },
@@ -186,6 +188,7 @@ function Dashboard({ user, onLogout }) {
           {tab === 'overview' && <OverviewPage {...props} />}
           {tab === 'transactions' && <TransactionsPage {...props} />}
           {tab === 'users' && <UsersPage {...props} />}
+          {tab === 'interactions' && <InteractionsPage {...props} />}
           {tab === 'architecture' && <ArchitectureTab lastEvent={liveFeed.find((e) => !e._alert)} />}
           {tab === 'pipeline' && <PipelinePage {...props} />}
           {tab === 'training' && <TrainingPage {...props} />}
