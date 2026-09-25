@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { Transaction, LakeBatch } from './models.js';
 import { putVolumeFile, databricksConfigured, volumeFileExists, dbProbe } from './databricksClient.js';
 import { VOLUME_PATH, CATALOG, SCHEMA } from './databricksProvision.js';
@@ -91,6 +94,27 @@ export async function benchmarkStatus() {
  * through benchmarkStageJob() and shown on the Model training page. One job at a time.
  */
 let stageJob = null;
+const STAGE_SEGMENTS = 8;
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Bytes [from, to] of url; resumes after dropped connections (up to 15 retries). */
+async function fetchRange(url, from, to, onBytes) {
+  const chunks = [];
+  let pos = from;
+  let failures = 0;
+  while (pos <= to) {
+    try {
+      const res = await fetch(url, { headers: { Range: `bytes=${pos}-${to}` } });
+      if (res.status !== 206) throw new Error(`range request answered HTTP ${res.status}`);
+      for await (const c of res.body) { chunks.push(c); pos += c.length; onBytes(c.length); }
+    } catch (err) {
+      failures += 1;
+      if (failures > 15) throw new Error(`download kept failing at byte ${pos}: ${err.message}`);
+      await pause(2000 * Math.min(failures, 5));
+    }
+  }
+  return Buffer.concat(chunks);
+}
 export const benchmarkStageJob = () => stageJob;
 
 export function startStageBenchmark() {
@@ -100,14 +124,27 @@ export function startStageBenchmark() {
   stageJob = job;
   const fail = (msg) => { job.state = 'error'; job.error = msg; job.finishedAt = new Date().toISOString(); };
   (async () => {
-    const src = await fetch(BENCHMARK.source).catch((err) => ({ ok: false, statusText: err.message }));
-    if (!src.ok) return fail(`Download from OpenML failed: ${src.status || ''} ${src.statusText}`);
-    job.total = Number(src.headers.get('content-length')) || null;
-    const chunks = [];
-    for await (const chunk of src.body) { chunks.push(chunk); job.bytes += chunk.length; }
-    if (job.total && job.bytes !== job.total) return fail(`Incomplete download: ${job.bytes} of ${job.total} bytes.`);
+    const head = await fetch(BENCHMARK.source, { method: 'HEAD' }).catch((err) => ({ ok: false, statusText: err.message }));
+    if (!head.ok) return fail(`openml.org did not answer: ${head.status || ''} ${head.statusText}`);
+    job.total = Number(head.headers.get('content-length'));
+    if (!job.total) return fail('openml.org did not report the file size.');
+    // openml.org is slow per connection and drops long downloads: fetch 8 ranges in
+    // parallel, each resuming from its last byte after a dropped connection.
+    // A finished download is kept in the OS temp folder, so a failed upload can be retried without downloading again.
+    const local = path.join(os.tmpdir(), 'sentinelpay-openml-1597.pq');
+    let body = await fs.readFile(local).catch(() => null);
+    if (body?.length === job.total) {
+      job.bytes = job.total;
+    } else {
+      const size = Math.ceil(job.total / STAGE_SEGMENTS);
+      const ranges = Array.from({ length: STAGE_SEGMENTS }, (_, i) => [i * size, Math.min(job.total, (i + 1) * size) - 1]);
+      const parts = await Promise.all(ranges.map(([from, to]) => fetchRange(BENCHMARK.source, from, to, (n) => { job.bytes += n; })));
+      body = Buffer.concat(parts);
+      if (body.length !== job.total) return fail(`Incomplete download: ${body.length} of ${job.total} bytes.`);
+      await fs.writeFile(local, body);
+    }
     job.state = 'uploading';
-    const put = await putVolumeFile(BENCHMARK.path, Buffer.concat(chunks));
+    const put = await putVolumeFile(BENCHMARK.path, body);
     if (put.error) return fail(`Upload to ${BENCHMARK.path} failed: ${put.error}`);
     job.state = 'done';
     job.finishedAt = new Date().toISOString();

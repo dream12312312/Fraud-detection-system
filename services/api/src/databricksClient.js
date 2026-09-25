@@ -92,7 +92,8 @@ export async function putVolumeFile(path, content) {
     }
     return { ok: true };
   } catch (err) {
-    return { error: err.message };
+    // undici reports network problems as "fetch failed"; the useful part is the cause.
+    return { error: [err.message, err.cause?.code, err.cause?.message].filter(Boolean).join(' · ') };
   }
 }
 
