@@ -232,6 +232,9 @@ router.post('/transactions/:txId/confirm', async (req, res) => {
 router.post('/transactions/:txId/report', async (req, res) => {
   const tx = await Transaction.findOne({ txId: req.params.txId, userId: req.user._id });
   if (!tx) return res.status(404).json({ error: 'Transaction not found' });
+  // only a payment still waiting on the customer can be reported; a settled one
+  // (e.g. already approved by the fraud team) has moved money and keeps no hold
+  if (tx.status !== 'CHALLENGED') return res.status(400).json({ error: `This payment was already settled (${tx.status}), so it can no longer be reported here.` });
   tx.status = 'BLOCKED';
   tx.reasons = [...(tx.reasons || []), 'USER_REPORTED_FRAUD'];
   await tx.save();

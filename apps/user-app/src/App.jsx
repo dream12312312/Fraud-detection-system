@@ -149,7 +149,7 @@ function ReviewModal({ review, onDecision, onClose, busy }) {
           Our fraud engine flagged this transaction for verification. Please review the details.
         </p>
         <div className="review-row"><span className="k">Transaction</span><b>{review.txId}</b></div>
-        <div className="review-row"><span className="k">To</span><b>{review.to}</b></div>
+        <div className="review-row"><span className="k">To</span><b>{review.merchant || 'Transfer'}</b></div>
         <div className="review-row"><span className="k">Amount</span><b>{money(review.amount)}</b></div>
         <div className="review-row">
           <span className="k">Risk</span>
@@ -364,7 +364,7 @@ function Shell({ user, onUser, onLogout }) {
   const [dismissed, setDismissed] = useState(() => new Set());
   const dismissAll = () => setDismissed((s) => new Set([...s, ...data.txns.filter((t) => t.status === 'CHALLENGED').map((t) => t.txId)]));
   const closeReview = () => { dismissAll(); setReview(null); };
-  const openReview = () => { if (reviewing) setReview(reviewing); };
+  const openReview = (tx) => { const t = tx?.txId ? tx : reviewing; if (t) setReview(t); };
 
   const decide = async (kind) => {
     if (!review) return;
@@ -408,7 +408,7 @@ function Shell({ user, onUser, onLogout }) {
             <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} beneficiaries={data.beneficiaries} notifs={data.notifs} loading={loading} go={setTab} onReview={openReview} />
           )}
           {tab === 'transfer' && <TransferTab data={data} flashMsg={flashMsg} reload={load} />}
-          {tab === 'transactions' && <TxnTab txns={data.txns} loading={loading} />}
+          {tab === 'transactions' && <TxnTab txns={data.txns} loading={loading} onReview={openReview} />}
           {tab === 'beneficiaries' && <BeneficiaryTab data={data} flashMsg={flashMsg} reload={load} />}
           {tab === 'notifications' && <NotifTab notifs={data.notifs} reload={load} now={now} />}
         </main>
@@ -720,7 +720,7 @@ function TransferTab({ data, flashMsg, reload }) {
 
 const TX_FILTERS = [['all', 'All'], ['COMPLETED', 'Completed'], ['CHALLENGED', 'Needs you'], ['BLOCKED', 'Blocked']];
 
-function TxnTab({ txns, loading }) {
+function TxnTab({ txns, loading, onReview }) {
   const [open, setOpen] = useState(null);
   const [filter, setFilter] = useState('all');
   if (loading) return <div className="card"><p style={{ color: 'var(--text-dim)' }}>Loading…</p></div>;
@@ -769,7 +769,12 @@ function TxnTab({ txns, loading }) {
                     <td className={`amount ${t.type === 'DEPOSIT' ? 'in' : ''}`}>{t.type === 'DEPOSIT' ? '+' : '−'}{money(t.amount)}</td>
                     <td><span className={`badge ${t.status}`}>{t.status}</span></td>
                     <td><RiskBadge level={t.riskLevel} prob={t.fraudProbability} /></td>
-                    <td className="faint" style={{ textAlign: 'right' }}>{open === t._id ? '▲' : '▼'}</td>
+                    <td className="faint" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {t.status === 'CHALLENGED' && (
+                        <button className="btn sm success" style={{ marginRight: 8 }} onClick={(e) => { e.stopPropagation(); onReview(t); }}>Confirm or report</button>
+                      )}
+                      {open === t._id ? '▲' : '▼'}
+                    </td>
                   </tr>
                   {open === t._id && (
                     <tr className="journey-row"><td colSpan={6}><PaymentJourney tx={t} /></td></tr>

@@ -83,7 +83,10 @@ export function TxDetail({ tx, onClose, onChanged, flash }) {
         <RiskBadge p={tx.fraudProbability} />
       </div>
       {waiting && (
-        <div className="flash warn"><span>⚠️</span><div style={{ flex: 1 }}><b>Waiting for a decision</b>Approve moves the money; block releases the hold.
+        <div className="flash warn"><span>⚠️</span><div style={{ flex: 1 }}>
+          {tx.status === 'CHALLENGED'
+            ? <><b>Waiting for the customer</b>The customer has been asked to confirm or report this payment in their app. Override only if they cannot (for example, a support call). Approve moves the money; block releases the hold.</>
+            : <><b>Stuck before scoring</b>The fraud engine never answered, so no one else can settle this payment. Approve moves the money; block releases the hold.</>}
           <div className="row" style={{ gap: 8, marginTop: 10 }}>
             <button className="btn success sm" disabled={!!busy} onClick={() => resolve('approve')}>Approve payment</button>
             <button className="btn danger sm" disabled={!!busy} onClick={() => resolve('block')}>Block payment</button>
