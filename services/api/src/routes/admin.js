@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { User, Account, Beneficiary, Transaction, Notification, TrainingRun } from '../models.js';
 import { requireAuth, requireAdmin } from '../auth.js';
-import { trackReq, interactionModel, interactionsReady, interactionsInfo } from '../interactions.js';
+import { trackReq, interactionModel, interactionsReady, interactionsInfo, interactionsDb } from '../interactions.js';
 import { config } from '../config.js';
 import {
   databricksSnapshot, medallionCounts, listMlflowExperiments, listMlflowRuns,
@@ -274,9 +274,11 @@ router.get('/stats', async (_req, res) => {
  * whether every part of the platform is actually up.
  */
 router.get('/system', async (_req, res) => {
+  const mem = process.memoryUsage();
   const out = {
     time: new Date().toISOString(),
-    mongo: { connected: mongoose.connection.readyState === 1 },
+    api: { uptimeSec: Math.round(process.uptime()), node: process.version, rssMb: Math.round(mem.rss / 1048576), heapUsedMb: Math.round(mem.heapUsed / 1048576), heapTotalMb: Math.round(mem.heapTotal / 1048576) },
+    mongo: { connected: mongoose.connection.readyState === 1, latencyMs: null },
     kafka: { enabled: config.kafka.enabled, brokers: config.kafka.brokers },
     databricks: {
       hostConfigured: Boolean(process.env.DATABRICKS_HOST),
@@ -285,16 +287,21 @@ router.get('/system', async (_req, res) => {
       catalog: process.env.DATABRICKS_CATALOG || 'fraud',
       schema: process.env.DATABRICKS_SCHEMA || 'analytics'
     },
-    fraudEngine: { url: config.fraudEngineUrl, reachable: false, mode: 'UNKNOWN', modelLoaded: null, features: null },
+    fraudEngine: { url: config.fraudEngineUrl, reachable: false, mode: 'UNKNOWN', modelLoaded: null, features: null, latencyMs: null },
     counts: {}
   };
+  // Round-trip timings are measured here, per request — nothing is estimated.
+  const timed = async (fn) => { const t = performance.now(); await fn(); return Math.round((performance.now() - t) * 10) / 10; };
+  try { if (out.mongo.connected) out.mongo.latencyMs = await timed(() => mongoose.connection.db.admin().ping()); } catch { /* ping failed — latency stays null */ }
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1500);
+    const t0 = performance.now();
     const r = await fetch(`${config.fraudEngineUrl}/health`, { signal: controller.signal });
     clearTimeout(timer);
     if (r.ok) {
       const h = await r.json();
+      out.fraudEngine.latencyMs = Math.round((performance.now() - t0) * 10) / 10;
       out.fraudEngine.reachable = true;
       out.fraudEngine.modelLoaded = Boolean(h.model_loaded);
       out.fraudEngine.features = h.features;
@@ -313,6 +320,7 @@ router.get('/system', async (_req, res) => {
       Notification.countDocuments({ type: 'FRAUD_ALERT' })
     ]);
     out.interactions = interactionsInfo();
+    try { if (out.interactions.connected) out.interactions.latencyMs = await timed(() => interactionsDb().admin().ping()); } catch { /* stays unset */ }
     out.counts = { users, pendingUsers, activeUsers, blockedUsers, totalTx, blockedTx, challengedTx, fraudAlerts };
   } catch { /* counts stay empty if the db hiccups */ }
   res.json(out);
