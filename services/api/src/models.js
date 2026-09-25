@@ -56,10 +56,32 @@ const TransactionSchema = new Schema({
   decision: { type: String, enum: ['APPROVE', 'REVIEW', 'BLOCK', null] },
   reasons: [String],
   modelVersion: String,
-  decisionSource: { type: String, enum: ['ML_MODEL', 'RULES_FALLBACK', 'HEURISTIC', null] },
+  decisionSource: { type: String, enum: ['ML_MODEL', 'RULES_FALLBACK', 'ADMIN', 'HEURISTIC', null] },
+  // Snapshot of the real-time features the fraud engine scored (ML lineage:
+  // the same values land in the lakehouse and become training data).
+  features: {
+    hourOfDay: Number, velocity1h: Number, avgAmount30d: Number,
+    isNewBeneficiary: Boolean, homeCountry: String
+  },
+  // Admin balance adjustments are ledger entries, never fraud-scored.
+  adminNote: String,
+  // Set when the transaction was exported to the Databricks landing volume.
+  lakeLandedAt: { type: Date, default: null, index: true },
   createdAt: { type: Date, default: Date.now, index: true },
   updatedAt: { type: Date, default: Date.now }
 });
+
+/** One file exported from MongoDB to the Databricks landing volume. */
+const LakeBatchSchema = new Schema({
+  path: String,
+  rows: Number,
+  bytes: Number,
+  trigger: { type: String, enum: ['MANUAL', 'KAFKA_BRIDGE'], default: 'MANUAL' },
+  triggeredBy: { type: Types.ObjectId, ref: 'User' },
+  error: String,
+  createdAt: { type: Date, default: Date.now, index: true }
+});
+export const LakeBatch = model('LakeBatch', LakeBatchSchema);
 
 const NotificationSchema = new Schema({
   userId: { type: Types.ObjectId, ref: 'User', required: true, index: true },
@@ -81,8 +103,21 @@ const TrainingRunSchema = new Schema({
   databricksJobId: Number,
   stateMessage: String,
   metrics: {
-    precision: Number, recall: Number, f1: Number, rocAuc: Number, prAuc: Number
+    precision: Number, recall: Number, f1: Number, rocAuc: Number, prAuc: Number, accuracy: Number
   },
+  // Same test set scored by the base (rule-based) model, for comparison.
+  baselineMetrics: {
+    precision: Number, recall: Number, f1: Number, rocAuc: Number, prAuc: Number, accuracy: Number
+  },
+  modelType: String, // chosen by the developer, e.g. logistic_regression
+  dataset: String, // chosen by the developer, e.g. synthetic_payments
+  // Per-stage state copied from the Databricks job's task runs (never invented).
+  stages: [{
+    key: String, state: String, result: String, message: String, taskRunId: Number,
+    startedAt: Date, finishedAt: Date, output: Schema.Types.Mixed
+  }],
+  registeredModel: String,
+  registeredVersion: String,
   championModel: String,
   mlflowRunId: String,
   mlflowExperimentId: String,

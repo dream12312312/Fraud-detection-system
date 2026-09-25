@@ -43,7 +43,7 @@ def flush_batch(w: WorkspaceClient, batch: list[dict]):
         groups.setdefault((ev["_topic"], day), []).append(ev)
 
     for (topic, day), events in groups.items():
-        target = f"{VOLUME}/{topic}/dt={day}/"
+        target = f"{VOLUME}/data/{topic}/dt={day}/"  # same tree the Bronze Auto Loader reads
         fname = f"part-{int(time.time() * 1000)}.json"
         payload = "\n".join(json.dumps(e, default=str) for e in events)
         w.files.upload(f"{target}{fname}", payload.encode("utf-8"), overwrite=True)

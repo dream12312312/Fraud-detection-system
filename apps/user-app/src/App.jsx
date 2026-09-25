@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { api, saveSession, clearSession, verifySession, setAccessToken, setSessionExpiredHandler, useNow } from './lib.js';
+import { PaymentJourney, ProtectionStrip } from './journey.jsx';
+import { ShieldArt, PipelineArt } from './illustrations.jsx';
 // note: the component-local useFlashSafe below replaces lib.js's useFlash so the
 // flash timer is cancellable (avoids an older flash wiping a newer one)
 
@@ -170,31 +172,39 @@ function ReviewModal({ review, onDecision, onClose, busy }) {
 
 /* ---------- dashboard ---------- */
 
-const TABS = [
-  { id: 'overview', ico: '🏠', label: 'Overview', hint: 'Balances and recent activity' },
-  { id: 'transfer', ico: '💸', label: 'Transfer', hint: 'Send money to a payee' },
-  { id: 'transactions', ico: '🧾', label: 'Transactions', hint: 'Full history with fraud decisions' },
-  { id: 'beneficiaries', ico: '👥', label: 'Beneficiaries', hint: 'Saved payees for faster transfers' },
-  { id: 'notifications', ico: '🔔', label: 'Alerts', hint: 'Security and account notifications' }
+const NAV = [
+  { group: 'Money', items: [
+    { id: 'overview', ico: '🏠', label: 'Overview', hint: 'Balances and recent activity' },
+    { id: 'transfer', ico: '💸', label: 'Send money', hint: 'Send money to a payee' },
+    { id: 'beneficiaries', ico: '👥', label: 'Payees', hint: 'Saved payees for faster, lower-risk transfers' }
+  ] },
+  { group: 'Activity & security', items: [
+    { id: 'transactions', ico: '🧾', label: 'Transactions', hint: 'History with how each payment was checked' },
+    { id: 'notifications', ico: '🔔', label: 'Alerts', hint: 'Security and account notifications' }
+  ] }
 ];
 
 function SideNav({ user, tab, setTab, unread, challenged, onLogout }) {
   const initials = (user_) => (user_.fullName || user_.email).split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   return (
     <nav className="side-nav">
-      <div className="nav-label">Banking</div>
-      {TABS.map((t) => (
-        <button
-          key={t.id}
-          className={`nav-item ${tab === t.id ? 'active' : ''}`}
-          onClick={() => setTab(t.id)}
-          title={t.hint}
-          aria-label={`${t.label} — ${t.hint}`}
-        >
-          <span className="nav-ico">{t.ico}</span>{t.label}
-          {t.id === 'notifications' && unread > 0 && <span className="nav-count" title={`${unread} unread notifications`}>{unread}</span>}
-          {t.id === 'transactions' && challenged && <span className="nav-dot" title="A transaction needs your confirmation" />}
-        </button>
+      {NAV.map((g) => (
+        <div key={g.group} className="nav-group">
+          <div className="nav-label">{g.group}</div>
+          {g.items.map((t) => (
+            <button
+              key={t.id}
+              className={`nav-item ${tab === t.id ? 'active' : ''}`}
+              onClick={() => setTab(t.id)}
+              title={t.hint}
+              aria-label={`${t.label} — ${t.hint}`}
+            >
+              <span className="nav-ico">{t.ico}</span>{t.label}
+              {t.id === 'notifications' && unread > 0 && <span className="nav-count" title={`${unread} unread notifications`}>{unread}</span>}
+              {t.id === 'transactions' && challenged && <span className="nav-dot" title="A transaction needs your confirmation" />}
+            </button>
+          ))}
+        </div>
       ))}
       <div className="side-foot">
         <div className="side-user">
@@ -449,6 +459,12 @@ function OverviewTab({ user, checking, savings, txns, notifs, loading, go }) {
             <button className="btn ghost" onClick={() => go('transactions')} title="See all transactions and their fraud decisions">🧾 Activity</button>
           </div>
         </div>
+        <ShieldArt className="hero-art" />
+      </div>
+
+      <div className="card protect-card">
+        <div className="card-title"><h3><span className="ico">🛡️</span> How every payment is protected</h3><button className="btn ghost sm" onClick={() => go('transactions')}>See it on your payments</button></div>
+        <ProtectionStrip />
       </div>
 
       <div className="kpi-row" style={{ marginBottom: 18 }}>
@@ -507,7 +523,7 @@ function OverviewTab({ user, checking, savings, txns, notifs, loading, go }) {
                         <tr key={t._id}>
                           <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{timeAgo(t.createdAt)}</td>
                           <td>{t.merchant || 'Transfer'} <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>{t.txId}</span></td>
-                          <td className="amount">−{money(t.amount)}</td>
+                          <td className={`amount ${t.type === 'DEPOSIT' ? 'in' : ''}`}>{t.type === 'DEPOSIT' ? '+' : '−'}{money(t.amount)}</td>
                           <td><span className={`badge ${t.status}`}>{t.status}</span></td>
                         </tr>
                       ))}
@@ -566,7 +582,7 @@ function TransferTab({ data, flashMsg, reload }) {
     setBusy(true);
     try {
       const res = await api('/transfer', { method: 'POST', body: { ...form, amount: Number(form.amount) } });
-      setLast(res);
+      setLast({ ...res, decisionSource: res.source, country: form.country, createdAt: res.createdAt || new Date().toISOString() });
       if (res.status === 'CHALLENGED') {
         flashMsg('warn', 'Your payment is being reviewed for security reasons. Please confirm it below to continue.');
       } else if (res.status === 'BLOCKED') {
@@ -625,19 +641,21 @@ function TransferTab({ data, flashMsg, reload }) {
       </div>
 
       <div className="card">
-        <div className="card-title"><h3><span className="ico">🔍</span> Last payment</h3></div>
+        <div className="card-title"><h3><span className="ico">🔍</span> What happened to your payment</h3></div>
         {!last
-          ? <p style={{ color: 'var(--text-dim)', fontSize: 13.5 }}>Your most recent result will show up here — including the fraud-engine decision, risk score and the reasons behind it.</p>
+          ? (
+            <>
+              <PipelineArt className="side-art" />
+              <p style={{ color: 'var(--text-dim)', fontSize: 13.5 }}>After you press <b>Send payment</b>, every step your payment goes through shows up here: the risk signals we measured, the fraud-engine score, the decision and where the data goes next.</p>
+            </>
+          )
           : (
             <>
-              <div className="review-row"><span className="k">Transaction</span><b>{last.txId}</b></div>
-              <div className="review-row"><span className="k">Status</span><span className={`badge ${last.status}`}>{last.status}</span></div>
-              <div className="review-row"><span className="k">Decision</span><b>{last.decision || '—'}</b></div>
-              <div className="review-row"><span className="k">Risk</span><RiskBadge level={last.riskLevel} prob={last.fraudProbability} /></div>
-              <div className="review-row"><span className="k">Scored by</span><b>{last.source || '—'}</b></div>
-              {last.reasons?.length > 0 && (
-                <div className="card-hint">Reasons: {last.reasons.join(', ').replaceAll('_', ' ').toLowerCase()}</div>
-              )}
+              <div className="row between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                <span className="mono">{last.txId}</span>
+                <span className="row" style={{ gap: 6 }}><span className={`badge ${last.status}`}>{last.status}</span><RiskBadge level={last.riskLevel} prob={last.fraudProbability} /></span>
+              </div>
+              <PaymentJourney tx={last} />
             </>
           )}
       </div>
@@ -647,37 +665,56 @@ function TransferTab({ data, flashMsg, reload }) {
 
 /* ---------- transactions ---------- */
 
+const TX_FILTERS = [['all', 'All'], ['COMPLETED', 'Completed'], ['CHALLENGED', 'Needs you'], ['BLOCKED', 'Blocked']];
+
 function TxnTab({ txns, loading }) {
+  const [open, setOpen] = useState(null);
+  const [filter, setFilter] = useState('all');
   if (loading) return <div className="card"><p style={{ color: 'var(--text-dim)' }}>Loading…</p></div>;
+  const shown = txns.filter((t) => filter === 'all' || t.status === filter);
   return (
     <div className="card">
-      <div className="page-head" style={{ marginBottom: 14 }}>
-        <h2>Transactions</h2>
-        <div className="sub">Every transaction with its fraud risk score, decision and the reasons behind it.</div>
-      </div>
-      {txns.length === 0 && <Empty icon="🧾" title="Nothing here yet" text="You have no transactions yet. Start your first payment to see your activity here." />}
-      {txns.length > 0 && <>
-      <div className="card-title"><h3>All transactions</h3><span className="card-hint" style={{ marginTop: 0 }}>{txns.length} shown</span></div>
-      <table className="data">
-        <thead><tr><th>Date</th><th>Transaction</th><th>Description</th><th>Amount</th><th>Status</th><th>Risk</th><th>Reasons</th></tr></thead>
-        <tbody>
-          {txns.map((t) => (
-            <tr key={t._id}>
-              <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{new Date(t.createdAt).toLocaleString()}</td>
-              <td style={{ fontFamily: 'monospace', fontSize: 12.5 }}>{t.txId}</td>
-              <td>{t.merchant || 'Transfer'}</td>
-              <td className="amount">−{money(t.amount)}</td>
-              <td><span className={`badge ${t.status}`}>{t.status}</span></td>
-              <td><RiskBadge level={t.riskLevel} prob={t.fraudProbability} /></td>
-              <td style={{ color: 'var(--text-dim)', fontSize: 12.5 }}>{(t.reasons || []).join(', ').replaceAll('_', ' ').toLowerCase() || '—'}</td>
-            </tr>
+      <div className="page-head row between" style={{ marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <h2>Transactions</h2>
+          <div className="sub">Click a payment to see every step it went through — risk signals, score, decision and where the data went.</div>
+        </div>
+        <div className="seg">
+          {TX_FILTERS.map(([id, label]) => (
+            <button key={id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>
+              {label} <span className="seg-count">{id === 'all' ? txns.length : txns.filter((t) => t.status === id).length}</span>
+            </button>
           ))}
-                  </tbody>
-                </table>
-              </>}
-            </div>
-          );
-        }
+        </div>
+      </div>
+      {shown.length === 0 && <Empty icon="🧾" title="Nothing here yet" text={txns.length ? 'No payments match this filter.' : 'You have no transactions yet. Start your first payment to see your activity here.'} />}
+      {shown.length > 0 && (
+        <div className="table-wrap">
+          <table className="data clickable">
+            <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th><th>Risk</th><th /></tr></thead>
+            <tbody>
+              {shown.map((t) => (
+                <React.Fragment key={t._id}>
+                  <tr onClick={() => setOpen(open === t._id ? null : t._id)} className={open === t._id ? 'sel' : ''}>
+                    <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{new Date(t.createdAt).toLocaleString()}</td>
+                    <td>{t.merchant || 'Transfer'} <span className="mono" style={{ marginLeft: 6 }}>{t.txId}</span></td>
+                    <td className={`amount ${t.type === 'DEPOSIT' ? 'in' : ''}`}>{t.type === 'DEPOSIT' ? '+' : '−'}{money(t.amount)}</td>
+                    <td><span className={`badge ${t.status}`}>{t.status}</span></td>
+                    <td><RiskBadge level={t.riskLevel} prob={t.fraudProbability} /></td>
+                    <td className="faint" style={{ textAlign: 'right' }}>{open === t._id ? '▲' : '▼'}</td>
+                  </tr>
+                  {open === t._id && (
+                    <tr className="journey-row"><td colSpan={6}><PaymentJourney tx={t} /></td></tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function BeneficiaryTab({ data, flashMsg, reload }) {
   const [form, setForm] = useState({ nickname: '', accountNumber: '', bankName: '' });

@@ -1,19 +1,29 @@
+# Model training: 4 stages, started manually from the admin console with the
+# developer's choice of model + dataset (job parameters). Serverless compute.
+# The admin console can also create this job itself (Databricks page → Set up / sync).
 resources:
   jobs:
     model_training:
       name: sentinelpay-model-training
-      environments:
-        - environment_key: serverless
-          spec:
-            client: "1"
-            dependencies:
-              - mlflow
-              - scikit-learn
+      max_concurrent_runs: 1
+      parameters:
+        - { name: catalog, default: fraud }
+        - { name: schema, default: analytics }
+        - { name: model, default: logistic_regression }
+        - { name: dataset, default: synthetic_payments }
+        - { name: seed, default: "42" }
+        - { name: sentinelpay_run_id, default: "" }
       tasks:
-        - task_key: train
-          notebook_task:
-            notebook_path: ../databricks/notebooks/04_train_model.py
-          environment_key: serverless
+        - task_key: load_dataset
+          notebook_task: { notebook_path: ../databricks/notebooks/10_load_dataset.py }
+        - task_key: build_features
+          depends_on: [{ task_key: load_dataset }]
+          notebook_task: { notebook_path: ../databricks/notebooks/11_build_features.py }
+        - task_key: train_model
+          depends_on: [{ task_key: build_features }]
+          notebook_task: { notebook_path: ../databricks/notebooks/12_train_model.py }
+        - task_key: evaluate_register
+          depends_on: [{ task_key: train_model }]
+          notebook_task: { notebook_path: ../databricks/notebooks/13_evaluate_register.py }
       queue:
         enabled: true
-

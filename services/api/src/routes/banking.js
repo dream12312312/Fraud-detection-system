@@ -4,6 +4,7 @@ import { User, Account, Beneficiary, Transaction, Notification } from '../models
 import { requireAuth } from '../auth.js';
 import { scoreTransaction, fallbackRules } from '../fraudClient.js';
 import { TOPICS, publish } from '../kafka.js';
+import { transactionEvent } from '../lakehouse.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -104,6 +105,14 @@ router.post('/transfer', async (req, res) => {
         { $group: { _id: null, avg: { $avg: '$amount' } } }
       ])
     ]);
+    const features = {
+      hourOfDay: tx.createdAt.getUTCHours(),
+      velocity1h: velocity_1h,
+      avgAmount30d: avgAgg[0]?.avg || amt,
+      isNewBeneficiary: !beneficiary,
+      homeCountry: req.user.homeCountry || 'US'
+    };
+    tx.features = features;
     let decision = await scoreTransaction({
       transaction_id: tx.txId,
       user_id: String(req.user._id),
@@ -111,12 +120,12 @@ router.post('/transfer', async (req, res) => {
       type: tx.type,
       merchant_category: merchant || 'TRANSFER',
       country: tx.country,
-      home_country: req.user.homeCountry || 'US',
-      is_new_beneficiary: !beneficiary,
+      home_country: features.homeCountry,
+      is_new_beneficiary: features.isNewBeneficiary,
       channel: 'WEB',
       timestamp: tx.createdAt.toISOString(),
       velocity_1h,
-      avg_amount_30d: avgAgg[0]?.avg || amt
+      avg_amount_30d: features.avgAmount30d
     });
     if (!decision) {
       decision = fallbackRules({ amount: amt, dailyLimit: from.dailyLimit, isNewBeneficiary: !beneficiary, homeCountry: req.user.homeCountry, country: tx.country });
@@ -148,10 +157,10 @@ router.post('/transfer', async (req, res) => {
     await tx.save();
     emitTx(req, tx, req.user._id);
 
-    await publish(TOPICS.raw, tx.txId, { event: 'transaction.created', transaction_id: tx.txId, user_id: String(req.user._id), amount: amt, type: tx.type, country: tx.country, is_new_beneficiary: !beneficiary, status: tx.status });
-    await publish(TOPICS.status, tx.txId, { event: 'transaction.decision', transaction_id: tx.txId, decision, status: tx.status });
+    await publish(TOPICS.raw, tx.txId, transactionEvent(tx, { source: 'kafka' }));
+    await publish(TOPICS.status, tx.txId, { event: 'transaction.status', transaction_id: tx.txId, status: tx.status });
 
-    res.status(202).json({ txId: tx.txId, amount: amt, status: tx.status, fraudProbability: tx.fraudProbability, riskLevel: tx.riskLevel, decision: tx.decision, reasons: tx.reasons, source: tx.decisionSource });
+    res.status(202).json({ txId: tx.txId, amount: amt, status: tx.status, fraudProbability: tx.fraudProbability, riskLevel: tx.riskLevel, decision: tx.decision, reasons: tx.reasons, source: tx.decisionSource, modelVersion: tx.modelVersion, features, createdAt: tx.createdAt });
   } catch (err) {
     // Full technical detail goes to server logs; the user only ever sees a
     // friendly message (never a raw Mongoose/Mongo validation dump).

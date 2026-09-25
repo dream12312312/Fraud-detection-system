@@ -64,9 +64,12 @@ transactions, 7-day spending chart and your latest alerts.
 
 ## 6. Make a payment / transfer money
 
-1. Go to **Beneficiaries** and add a payee (nickname + account number).
-2. Go to **Transfer**, pick the payee, enter an amount and country, then **Send payment**.
-3. Every payment is scored in real time by the fraud engine.
+1. Go to **Payees** and add a payee (nickname + account number).
+2. Go to **Send money**, pick the payee, enter an amount and country, then **Send payment**.
+3. Every payment is scored in real time by the fraud engine. The panel
+   **What happened to your payment** shows each step: risk signals measured,
+   the fraud-engine score, the decision, and when it was added to the data lake.
+4. In **Transactions**, click any payment to see the same step-by-step path.
 
 ## 7. Transaction statuses
 
@@ -101,7 +104,7 @@ your own password before anything else. The temporary password only works once.
 | `services/api` | Express API (:4000): auth, banking, admin, socket.io, Kafka producer |
 | `services/fraud-engine` | FastAPI scorer (:8000): trained ML model or heuristic fallback |
 | `services/ml` | Local training script + artifacts (`model.joblib`) |
-| `databricks/` | Databricks Asset Bundle: notebooks + lake ingest bridge |
+| `databricks/` | Notebooks (medallion 01–03, training 10–13) + lake ingest bridge |
 | `resources/` | Databricks job definitions (medallion pipeline, model training) |
 
 ## Fraud decision flow (normal operation)
@@ -114,7 +117,7 @@ User transaction (POST /transfer)
   -> decision APPROVE | REVIEW | BLOCK
   -> stored in MongoDB (decisionSource: ML_MODEL | HEURISTIC | RULES_FALLBACK)
   -> user + admin notified (socket.io)
-  -> Kafka event (when enabled) -> bridge -> Databricks Bronze/Silver/Gold
+  -> landing export (or Kafka + bridge) -> Databricks volume -> Bronze/Silver/Gold
 ```
 
 The fraud engine has two modes:
@@ -124,50 +127,86 @@ Both are legitimate sources; the schema allows both.
 
 ## Data pipeline (Bronze/Silver/Gold)
 
-1. Enable Kafka (`KAFKA_ENABLED=true`) and start Kafka locally.
-2. Set `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_VOLUME_PATH` in `.env`.
-3. Run the bridge: `python databricks/jobs/lake_ingest_bridge.py`
-   (needs `confluent_kafka` + `databricks-sdk`).
-4. Deploy + run the medallion job: `databricks bundle deploy`, then run
-   `sentinelpay-medallion-pipeline` in the Databricks Jobs UI.
-5. Tables appear in catalog `fraud.analytics`: `bronze_events`, `silver_events`,
-   `gold_fraud_predictions`, `gold_fraud_kpis`, `gold_user_behavior`.
+Everything is controlled from the admin console; the Databricks token stays in
+the API server and never reaches a browser.
+
+1. **Databricks → Set up workspace** (once, and after editing a notebook). It
+   creates catalog `fraud`, schemas `analytics` + `landing`, the volume
+   `/Volumes/fraud/landing/events`, uploads the 7 notebooks to
+   `/Users/<you>/sentinelpay/notebooks` and creates/updates two serverless jobs.
+   On Free Edition the catalog can only be created through SQL, so
+   `DATABRICKS_WAREHOUSE_ID` must be set. No compute is used by set-up.
+2. **Data pipeline → Land N new**: settled transactions are exported from
+   MongoDB as NDJSON into the landing volume (`data/transactions/dt=…/`). Each
+   transaction is landed once (`lakeLandedAt`). With Kafka enabled, the lake
+   ingest bridge writes the same event shape into the same folder.
+3. **Data pipeline → Run pipeline** starts job `sentinelpay-medallion-pipeline`:
+   `01_bronze` (Auto Loader, availableNow) → `02_silver` (types, data contract,
+   dedupe, `silver_quarantine`) → `03_gold` (`gold_fraud_predictions`,
+   `gold_fraud_kpis`, `gold_user_behavior`). Task states and row counts appear
+   live on the page.
+
+The bundle files (`databricks.yml`, `resources/*.yml`) describe the same jobs
+for anyone using the Databricks CLI (`databricks bundle deploy`).
 
 ## Model training (manual only)
 
-Training never starts automatically. In the Admin console → **Model Training** →
-**Start Model Training** (you will confirm that Databricks compute is used).
+Training never starts automatically. Admin console → **Model training**:
 
-1. Deploy the training job: `databricks bundle deploy`
-   (creates job `sentinelpay-model-training` from `resources/model_training.yml`).
-2. Clicking start triggers the job via the Databricks Jobs API.
-3. The notebook (`databricks/notebooks/04_train_model.py`) trains logistic
-   regression + random forest, and logs params/metrics to workspace **MLflow**
-   (experiment `sentinelpay-fraud`) — inspect it in the Databricks MLflow UI.
-4. The console polls the run state (RUNNING → COMPLETED/FAILED) and pulls the
-   real MLflow metrics when the run finishes.
+1. Choose a model: Logistic Regression, Decision Tree, Random Forest,
+   Gradient Boosting or Naive Bayes (scikit-learn, preset parameters).
+2. Choose a dataset:
+   - **Synthetic payments**: seeded generator, 50k rows, same raw fields as live
+     payments, no download.
+   - **Platform transactions**: your own `silver_events` (needs >= 50 labelled
+     rows; labels = blocked or user-reported fraud, i.e. the base model's decisions).
+   - **Credit-card benchmark**: OpenML 1597, downloaded once and cached as the
+     Delta table `ref_creditcard`; benchmark only, since its PCA features do not
+     exist in live payments.
+3. **Start training** (confirm) runs job `sentinelpay-model-training`, four tasks:
+   `10_load_dataset` → `11_build_features` (the fraud engine's 8 features, quality
+   checks, seeded 75/25 split) → `12_train_model` (logs to MLflow) →
+   `13_evaluate_register` (scores the test set with the new model and with the
+   live base model, then registers a version of `fraud.analytics.fraud_classifier`).
+4. The page and the 3D view show each stage's real Databricks task state and
+   output (rows, features, metrics). Results, history and a base-model comparison
+   are kept per run.
 
-To use a trained model in real-time scoring, export the champion to
-`services/ml/artifacts/` (see `services/ml/train_model.py`) and restart the
-fraud engine.
+Registering a version does not deploy it: live payments keep using the base model
+(the fraud engine's rule-based heuristic) until a model is exported to
+`services/ml/artifacts/` and the engine is restarted.
 
 ## Monitoring
 
-Admin console sections:
-- **Transactions / Users** — live operations
-- **Data Processing** — 24h volume, decisions per hour, errors, medallion record
-  counts (needs `DATABRICKS_WAREHOUSE_ID` for live Delta counts)
-- **System** — Mongo, fraud engine, Kafka, Databricks configuration state
+Admin console navigation:
+- **Overview**: the flow MongoDB → landing → Bronze → Silver → Gold → model with
+  real counts, KPIs, live transactions and a "needs attention" list.
+- **Transactions / Users & money**: operations (see below).
+- **3D Architecture**: the whole system as three lanes (real-time serving,
+  ingestion & lakehouse, machine-learning loop) on a Databricks platform. Every
+  node shows live status; click one for details and links into Databricks. Use
+  **Walk through the pipeline** for a guided, step-by-step tour, or the 2D view
+  when WebGL is unavailable.
+- **Data pipeline / Model training / Databricks**: control pages described above.
+- **System health**: API, MongoDB, fraud engine, Kafka, Databricks, SQL warehouse.
 
 Everything shown comes from real system data; unavailable integrations show an
-honest "not configured" state instead of fake numbers.
+honest "not set up" state instead of fake numbers.
 
 ## User management
 
-- Search/filter users, open **Details** (accounts + transaction history)
-- Approve / Disable / Block
-- **Set temp password** — generates a random password shown ONCE, stores only a
-  bcrypt hash, and forces the user to change it at next sign-in.
+Admin console → **Users & money** → click a user:
+- **Money**: credit or debit any account (a reason is required; it is written to
+  the ledger as a DEPOSIT/WITHDRAWAL and the user is notified), set daily limits,
+  open a savings account. Debits cannot exceed balance minus holds.
+- **Transactions**: open any payment to see its processing path; challenged or
+  stuck payments can be **approved** (money moves, hold released) or **blocked**
+  (hold released).
+- **Profile**: name, email, home country, phone, role.
+- **Payees**, **Notifications**, and **Access**: status (active / pending /
+  disabled / blocked), one-time temporary password, delete user with all data.
+- **Create user** makes an approved account with an opening balance and a
+  one-time temporary password.
 
 ## Environment variables (.env)
 

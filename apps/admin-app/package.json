@@ -9,11 +9,14 @@
         "lint": "echo lint-not-configured"
     },
     "dependencies": {
+        "@react-three/drei": "^10.7.8",
+        "@react-three/fiber": "^9.8.1",
         "axios": "latest",
         "react": "latest",
         "react-dom": "latest",
         "recharts": "latest",
         "socket.io-client": "latest",
+        "three": "^0.180.0",
         "typescript": "latest"
     },
     "devDependencies": {
