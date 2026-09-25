@@ -121,6 +121,7 @@ async function fetchRange(url, from, to, onBytes) {
   return Buffer.concat(chunks);
 }
 export const benchmarkStageJob = () => stageJob;
+const isWholeParquet = (buf) => buf.length > 8 && buf.subarray(0, 4).toString() === 'PAR1' && buf.subarray(-4).toString() === 'PAR1';
 
 export function startStageBenchmark() {
   if (!databricksConfigured()) return { error: 'Databricks is not configured.' };
@@ -129,15 +130,17 @@ export function startStageBenchmark() {
   stageJob = job;
   const fail = (msg) => { job.state = 'error'; job.error = msg; job.finishedAt = new Date().toISOString(); };
   (async () => {
-    const head = await fetch(BENCHMARK.source, { method: 'HEAD' }).catch((err) => ({ ok: false, statusText: err.message }));
-    if (!head.ok) return fail(`openml.org did not answer: ${head.status || ''} ${head.statusText}`);
-    job.total = Number(head.headers.get('content-length'));
-    if (!job.total) return fail('openml.org did not report the file size.');
-    // openml.org is slow per connection and drops long downloads: fetch 8 ranges in
-    // parallel, each resuming from its last byte after a dropped connection.
     // A finished download is kept in the OS temp folder, so a failed upload can be retried without downloading again.
     const local = path.join(os.tmpdir(), 'sentinelpay-openml-1597.pq');
     let body = await fs.readFile(local).catch(() => null);
+    const head = await fetch(BENCHMARK.source, { method: 'HEAD' }).catch((err) => ({ ok: false, statusText: err.message }));
+    if (head.ok) job.total = Number(head.headers.get('content-length'));
+    // openml.org unreachable: a cached file is still usable when it is a whole Parquet file (PAR1 at both ends).
+    else if (body && isWholeParquet(body)) job.total = body.length;
+    else return fail(`openml.org did not answer: ${head.status || ''} ${head.statusText}`);
+    if (!job.total) return fail('openml.org did not report the file size.');
+    // openml.org is slow per connection and drops long downloads: fetch 8 ranges in
+    // parallel, each resuming from its last byte after a dropped connection.
     if (body?.length === job.total) {
       job.bytes = job.total;
     } else {
