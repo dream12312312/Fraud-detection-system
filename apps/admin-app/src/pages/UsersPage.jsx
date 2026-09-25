@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useAdminData, useAction, PageHead, Empty, RiskBadge, Drawer, KV, Tabs, Kpi, Confirm, money, timeAgo, int } from '../ui.jsx';
 import { TxDetail } from './TransactionsPage.jsx';
-import { UsersArt } from '../illustrations.jsx';
 
 const COUNTRIES = ['US', 'GB', 'DE', 'FR', 'CA', 'IN', 'BR', 'NG'];
 
@@ -230,14 +229,7 @@ export default function UsersPage({ flash }) {
 
   return (
     <>
-      <section className="hero-panel slim">
-        <div className="hero-copy">
-          <div className="eyebrow">Operations</div>
-          <h1>Users & money</h1>
-          <p>Approve sign-ups, edit profiles, credit or debit balances, set limits, resolve waiting payments and manage access — every change is logged and the user is notified.</p>
-        </div>
-        <UsersArt className="hero-art" />
-      </section>
+      <PageHead title="Users & money" sub="Approve sign-ups, edit profiles, credit or debit balances, set limits, resolve waiting payments and manage access. Every change is logged and the user is notified." />
       <div className="kpi-row" style={{ marginBottom: 16 }}>
         <Kpi label="Users" value={int(users.length)} />
         <Kpi label="Pending approval" value={int(count('PENDING'))} tone={count('PENDING') ? 'warn' : undefined} onClick={() => setFilter('PENDING')} />

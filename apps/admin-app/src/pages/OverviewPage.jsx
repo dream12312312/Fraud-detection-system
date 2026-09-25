@@ -1,34 +1,26 @@
 import React from 'react';
-import { useAdminData, Kpi, int, money, timeAgo, Empty } from '../ui.jsx';
-import { PipelineArt } from '../illustrations.jsx';
+import { useAdminData, Kpi, PageHead, int, money, timeAgo, Empty } from '../ui.jsx';
+import { StageMap } from '../flow.jsx';
 
 /**
- * Landing page: the data platform in one screen. The flow strip follows one
- * transaction's data from MongoDB to the model, with real counts at each hop.
+ * Landing page: the data platform in one screen. The stage map follows the
+ * payment data from MongoDB to Gold with real counts, backlogs and freshness.
  */
 export default function OverviewPage({ go, liveFeed }) {
-  const { data } = useAdminData({ stats: '/admin/stats', system: '/admin/system', pipeline: '/admin/pipeline', training: '/admin/training' }, 10000);
-  const { stats, system, pipeline, training } = data;
-  const mc = pipeline?.databricks?.medallionCounts ?? {};
+  const { data } = useAdminData({ stats: '/admin/stats', system: '/admin/system', pipeline: '/admin/pipeline', training: '/admin/training', flow: '/admin/dataflow' }, 10000);
+  const { stats, system, pipeline, training, flow } = data;
   const lake = pipeline?.lakehouse;
   const jobs = pipeline?.databricks?.jobs ?? [];
   const medJob = jobs.find((j) => j.name?.includes('medallion'));
   const fe = system?.fraudEngine;
   const cur = training?.current;
 
-  const flow = [
-    { id: 'mongo', ico: '🗄️', title: 'Operational DB', value: int(system?.counts?.totalTx), unit: 'transactions', tone: system?.mongo?.connected ? 'ok' : 'bad', note: 'MongoDB · system of record', go: 'transactions' },
-    { id: 'land', ico: '📦', title: 'Landing volume', value: int(lake?.landed), unit: 'rows landed', tone: lake ? (lake.pending ? 'warn' : 'ok') : 'idle', note: lake ? `${lake.pending} waiting to land` : '…', go: 'pipeline' },
-    { id: 'bronze', ico: '🥉', title: 'Bronze', value: int(mc.bronze_events), unit: 'raw events', tone: mc.bronze_events != null ? 'ok' : 'idle', note: 'Auto Loader ingest', go: 'pipeline' },
-    { id: 'silver', ico: '🥈', title: 'Silver', value: int(mc.silver_events), unit: 'clean events', tone: mc.silver_events != null ? 'ok' : 'idle', note: `${int(mc.silver_quarantine)} quarantined`, go: 'pipeline' },
-    { id: 'gold', ico: '🥇', title: 'Gold', value: int(mc.gold_fraud_predictions), unit: 'predictions', tone: mc.gold_fraud_predictions != null ? 'ok' : 'idle', note: `${int(mc.gold_user_behavior)} user profiles`, go: 'pipeline' },
-    { id: 'model', ico: '🧠', title: 'Model', value: cur?.modelType ? cur.modelType.replaceAll('_', ' ') : '—', unit: !training ? 'loading…' : cur ? `${cur.status.toLowerCase()}${cur.dataset ? ` · ${cur.dataset.replaceAll('_', ' ')}` : ''}` : 'never trained', tone: cur?.status === 'COMPLETED' ? 'ok' : cur?.status === 'FAILED' ? 'bad' : cur ? 'run' : 'idle', note: `live: ${fe?.mode === 'ML_MODEL' ? 'ML model' : fe?.reachable ? 'base model (rules)' : 'engine offline'}`, go: 'training' }
-  ];
 
   const todo = [
     stats?.pendingUsers > 0 && { ico: '⏳', text: `${stats.pendingUsers} user(s) waiting for approval`, go: 'users' },
     stats?.challenged > 0 && { ico: '⚠️', text: `${stats.challenged} transaction(s) waiting for confirmation`, go: 'transactions' },
-    lake?.pending > 0 && { ico: '📦', text: `${lake.pending} settled transaction(s) not yet in the lakehouse`, go: 'pipeline' },
+    flow?.goldBehind > 0 && { ico: '📦', text: `Gold is behind by ${flow.goldBehind} payment(s): ${lake?.pending ? `${lake.pending} not landed` : ''}${lake?.pending && flow.goldBehind > lake.pending ? ' · ' : ''}${flow.goldBehind > (lake?.pending || 0) ? `${flow.goldBehind - (lake?.pending || 0)} landed, waiting for a pipeline run` : ''}`, go: 'pipeline' },
+    flow?.hot?.stuck > 0 && { ico: '🧊', text: `${flow.hot.stuck} payment(s) stuck before scoring (hold still placed)`, go: 'transactions' },
     pipeline && !medJob && { ico: '🧱', text: 'Databricks jobs are not deployed yet', go: 'databricks' },
     fe && !fe.reachable && { ico: '🛑', text: 'Fraud engine offline — payments use fallback rules', go: 'system' },
     cur?.status === 'FAILED' && { ico: '⛔', text: `Last training run failed: ${cur.stateMessage || ''}`.slice(0, 120), go: 'training' }
@@ -36,33 +28,15 @@ export default function OverviewPage({ go, liveFeed }) {
 
   return (
     <>
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <div className="eyebrow">Data engineering platform</div>
-          <h1>From payment to prediction</h1>
-          <p>Every transfer is scored in real time, landed in the Databricks lakehouse, refined through Bronze → Silver → Gold, and used to train the next fraud model.</p>
-          <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-            <button className="btn sm" onClick={() => go('architecture')}>Open 3D architecture</button>
-            <button className="btn ghost sm" onClick={() => go('pipeline')}>Data pipeline</button>
-            <button className="btn ghost sm" onClick={() => go('training')}>Train a model</button>
-          </div>
-        </div>
-        <PipelineArt className="hero-art" />
-      </section>
+      <PageHead title="From payment to prediction" sub="Every transfer is scored in real time, landed in the Databricks lakehouse, refined through Bronze → Silver → Gold, and used to train the next fraud model.">
+        <button className="btn sm" onClick={() => go('architecture')}>Open live data flow</button>
+        <button className="btn ghost sm" onClick={() => go('pipeline')}>Data pipeline</button>
+        <button className="btn ghost sm" onClick={() => go('training')}>Train a model</button>
+      </PageHead>
 
-      <div className="flow-strip">
-        {flow.map((s, i) => (
-          <React.Fragment key={s.id}>
-            {i > 0 && <div className="flow-arrow" aria-hidden="true" />}
-            <button className={`flow-step ${s.tone}`} onClick={() => go(s.go)} title={`Open ${s.title}`}>
-              <div className="flow-top"><span className="flow-ico">{s.ico}</span><span className={`sdot ${s.tone}`} /></div>
-              <div className="flow-title">{s.title}</div>
-              <div className="flow-value">{s.value}</div>
-              <div className="flow-unit">{s.unit}</div>
-              <div className="flow-note">{s.note}</div>
-            </button>
-          </React.Fragment>
-        ))}
+      <div className="card">
+        <div className="card-title"><h3><span className="ico">🌊</span> Data flow</h3><button className="btn ghost sm" onClick={() => go('pipeline')}>Details</button></div>
+        <StageMap flow={flow} compact />
       </div>
 
       <div className="kpi-row" style={{ margin: '18px 0' }}>
@@ -71,7 +45,7 @@ export default function OverviewPage({ go, liveFeed }) {
         <Kpi label="⚠️ Challenged" value={int(stats?.challenged)} tone="warn" />
         <Kpi label="🚫 Blocked" value={int(stats?.blocked)} tone="danger" />
         <Kpi label="👥 Users" value={int(stats?.users)} onClick={() => go('users')} />
-        <Kpi label="🚨 Fraud alerts" value={int(stats?.fraudAlerts)} />
+        <Kpi label="🧠 Live model" value={fe ? (fe.mode === 'ML_MODEL' ? 'ML model' : fe.reachable ? 'Base (rules)' : 'Offline') : '…'} tone={fe && !fe.reachable ? 'danger' : undefined} hint={cur ? `latest training: ${cur.modelType} · ${cur.status}` : 'no training run yet'} onClick={() => go('training')} />
       </div>
 
       <div className="grid sidebar">

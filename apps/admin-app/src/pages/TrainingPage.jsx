@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { useAdminData, useAction, Empty, Confirm, CompareBars, Kpi, ExtLink, fmt, pct, int, timeAgo, duration } from '../ui.jsx';
-import { NeuralArt } from '../illustrations.jsx';
+import { useAdminData, useAction, PageHead, Empty, Confirm, CompareBars, Kpi, ExtLink, fmt, pct, int, timeAgo, duration } from '../ui.jsx';
+import { TrainingTimeline, Confusion } from '../flow.jsx';
 import { buildTrainingGraph } from '../architecture/graph.js';
 import { hasWebGL } from '../architecture/ArchitectureTab.jsx';
 import Fallback2D from '../architecture/Fallback2D.jsx';
@@ -71,18 +71,12 @@ export default function TrainingPage({ flash, go }) {
 
   return (
     <>
-      <section className="hero-panel slim">
-        <div className="hero-copy">
-          <div className="eyebrow">Machine learning</div>
-          <h1>Model training</h1>
-          <p>Pick a classic model and a dataset, train it on Databricks, and compare it with the base model that scores live payments today. Training only starts when you press the button.</p>
-        </div>
-        <NeuralArt className="hero-art" />
-      </section>
+      <PageHead title="Model training" sub="Pick a model and a dataset, train it on Databricks, and compare it with the base model that scores live payments today. Training only starts when you press the button." />
 
       <div className="grid train-grid">
         <div className="card">
           <div className="card-title"><h3><span className="ico">⚙️</span> 1 · Choose a model</h3></div>
+          {!options && <p className="faint" style={{ fontSize: 13 }}>Loading models and datasets from the API (the first load after a restart counts every lakehouse table, so it can take up to a minute)…</p>}
           <div className="choice-grid">
             {(options?.models || []).map((m) => (
               <button key={m.id} className={`choice ${model === m.id ? 'on' : ''}`} onClick={() => setModel(m.id)} disabled={active}>
@@ -168,6 +162,13 @@ export default function TrainingPage({ flash, go }) {
         <div className="card" style={{ marginTop: 18 }}><Empty icon="🧠" title="No training runs yet" text="Choose a model and a dataset above, then start training. Each stage lights up here as Databricks reports it." /></div>
       )}
 
+      {shown?.startedAt && (
+        <div className="card" style={{ marginTop: 18 }}>
+          <div className="card-title"><h3><span className="ico">⏱️</span> Where the time went</h3><span className="faint" style={{ fontSize: 12 }}>task start/end times reported by Databricks</span></div>
+          <TrainingTimeline run={shown} order={stages} />
+        </div>
+      )}
+
       {shown?.metrics?.f1 != null && (
         <div className="grid cols-2" style={{ marginTop: 18 }}>
           <div className="card">
@@ -186,6 +187,10 @@ export default function TrainingPage({ flash, go }) {
               <Kpi label="Recall" value={fmt(shown.metrics.recall)} />
               <Kpi label="Precision" value={fmt(shown.metrics.precision)} />
             </div>
+            {(() => {
+              const c = shown.stages?.find((x) => x.key === 'evaluate_register')?.output?.confusion;
+              return c ? <><div className="section-label">Test set outcomes (cut-off 0.5)</div><Confusion c={c} /></> : null;
+            })()}
             {shown.baselineMetrics?.prAuc != null && (
               <div className={`flash ${shown.metrics.prAuc > shown.baselineMetrics.prAuc ? 'ok' : 'warn'}`} style={{ marginTop: 12 }}>
                 <span>{shown.metrics.prAuc > shown.baselineMetrics.prAuc ? '📈' : '📉'}</span>
@@ -243,7 +248,7 @@ export default function TrainingPage({ flash, go }) {
       <div className="grid cols-2" style={{ marginTop: 18 }}>
         <div className="card">
           <div className="card-title"><h3><span className="ico">🔬</span> MLflow experiment</h3><ExtLink href={host && mlflow?.experiment && `${host}/ml/experiments/${mlflow.experiment.id}`}>Open</ExtLink></div>
-          {!mlflow?.experiment ? <Empty icon="🔬" title="No experiment yet" text="Created by the first training run." /> : (
+          {!mlflow ? <p className="faint">Loading from Databricks MLflow…</p> : !mlflow.experiment ? <Empty icon="🔬" title="No experiment yet" text="Created by the first training run." /> : (
             <table className="data"><thead><tr><th>Run</th><th>Status</th><th>F1</th><th>PR-AUC</th><th>When</th></tr></thead>
               <tbody>{mlflow.runs.slice(0, 8).map((r) => (
                 <tr key={r.runId}><td>{host ? <a href={`${host}/ml/experiments/${mlflow.experiment.id}/runs/${r.runId}`} target="_blank" rel="noopener noreferrer">{r.runName || r.runId.slice(0, 8)}</a> : r.runName}</td>
@@ -253,7 +258,7 @@ export default function TrainingPage({ flash, go }) {
         </div>
         <div className="card">
           <div className="card-title"><h3><span className="ico">🏷️</span> Registered versions</h3><span className="mono">{mlflow?.registeredModel}</span></div>
-          {!mlflow?.modelVersions?.length ? <Empty icon="🏷️" title="No versions yet" text="Each successful run registers a new version in Unity Catalog." /> : (
+           {!mlflow ? <p className="faint">Loading from Unity Catalog…</p> : !mlflow.modelVersions?.length ? <Empty icon="🏷️" title="No versions yet" text="Each successful run registers a new version in Unity Catalog." /> : (
             <table className="data"><thead><tr><th>Version</th><th>Status</th><th>Created</th></tr></thead>
               <tbody>{mlflow.modelVersions.map((v) => <tr key={v.version}><td><b>v{v.version}</b></td><td className="faint">{v.status}</td><td className="faint">{timeAgo(v.createdAt)}</td></tr>)}</tbody></table>
           )}

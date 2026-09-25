@@ -1,6 +1,5 @@
 import React from 'react';
-import { useAdminData, StateDot, int, timeAgo } from '../ui.jsx';
-import { ServerArt } from '../illustrations.jsx';
+import { useAdminData, PageHead, StateDot, int, timeAgo } from '../ui.jsx';
 
 function Tile({ ico, title, state, headline, rows }) {
   return (
@@ -19,14 +18,7 @@ export default function SystemPage() {
   const fe = s?.fraudEngine ?? {};
   return (
     <>
-      <section className="hero-panel slim">
-        <div className="hero-copy">
-          <div className="eyebrow">Platform</div>
-          <h1>System health</h1>
-          <p>Every service the platform depends on, checked live every 10 seconds{s?.time ? ` · last check ${timeAgo(s.time)}` : ''}.</p>
-        </div>
-        <ServerArt className="hero-art" />
-      </section>
+      <PageHead title="System health" sub={`Every service the platform depends on, checked live every 10 seconds${s?.time ? ` · last check ${timeAgo(s.time)}` : ''}.`} />
       <div className="grid cols-3">
         <Tile ico="🟢" title="Node.js API" state={s ? 'ok' : 'error'} headline={s ? 'Online' : 'Unreachable'} rows={[['Port', '4000'], ['Realtime', 'Socket.IO']]} />
         <Tile ico="🗄️" title="MongoDB" state={s?.mongo?.connected ? 'ok' : 'error'} headline={s?.mongo?.connected ? 'Connected' : 'Disconnected'}

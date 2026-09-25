@@ -81,7 +81,7 @@ const NAV = [
     { id: 'users', ico: '👥', label: 'Users & money', hint: 'Approve, edit, credit/debit, limits, access' }
   ] },
   { group: 'Data engineering', items: [
-    { id: 'architecture', ico: '🧭', label: '3D Architecture', hint: 'Interactive map of the whole pipeline with live status' },
+    { id: 'architecture', ico: '🧭', label: 'Live data flow (3D)', hint: 'Every payment and pipeline run moving through the platform, live' },
     { id: 'pipeline', ico: '🌊', label: 'Data pipeline', hint: 'Landing → Bronze → Silver → Gold' },
     { id: 'training', ico: '🧠', label: 'Model training', hint: 'Choose a model + dataset, train on Databricks, compare' }
   ] },

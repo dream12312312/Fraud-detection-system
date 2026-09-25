@@ -1,7 +1,8 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { buildArchitecture, laneStops, STATUS, LAYERS, LANES } from './graph.js';
 import Fallback2D from './Fallback2D.jsx';
-import { useAdminData } from '../ui.jsx';
+import { useAdminData, timeAgo } from '../ui.jsx';
+import { ms } from '../flow.jsx';
 
 // three.js is only downloaded when a 3D view is opened.
 const Scene3D = lazy(() => import('./Scene3D.jsx'));
@@ -108,16 +109,14 @@ function StageList({ lanes, platform, selected, onPick, focus }) {
 const FOCUS = [{ id: 'all', label: 'Whole pipeline' }, ...LANES.map((l) => ({ id: l.id, label: l.label }))];
 
 export default function ArchitectureTab({ lastEvent }) {
-  const { data, errors } = useAdminData({
-    system: '/admin/system', pipeline: '/admin/pipeline', training: '/admin/training', mlflow: '/admin/training/mlflow', stats: '/admin/stats'
+  const { data, errors, reload } = useAdminData({
+    system: '/admin/system', pipeline: '/admin/pipeline', training: '/admin/training', mlflow: '/admin/training/mlflow', stats: '/admin/stats', flow: '/admin/dataflow'
   }, 6000);
   const apiOnline = data.system ? !errors.system : errors.system ? false : null;
   const webgl = useMemo(hasWebGL, []);
   const [view, setView] = useState(webgl ? '3d' : '2d');
   const [selected, setSelected] = useState(null);
   const [focus, setFocus] = useState('all');
-  const [tour, setTour] = useState(null); // index into stops while walking through
-  const [autoplay, setAutoplay] = useState(false);
   const [listOpen, setListOpen] = useState(() => window.innerWidth > 1080);
   const sceneRef = useRef(null);
   const autoFocused = useRef(false);
@@ -125,11 +124,18 @@ export default function ArchitectureTab({ lastEvent }) {
   const { nodes, edges, trainingActive, platform, medRunning } = useMemo(
     () => buildArchitecture({ ...data, apiOnline }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data.system, data.pipeline, data.training, data.mlflow, data.stats, apiOnline]
+    [data.system, data.pipeline, data.training, data.mlflow, data.stats, data.flow, apiOnline]
   );
   const nodesById = useMemo(() => ({ ...Object.fromEntries(nodes.map((nd) => [nd.id, nd])), databricks: platform }), [nodes, platform]);
   const lanes = useMemo(() => laneStops(nodes), [nodes]);
-  const stops = useMemo(() => lanes.flatMap((l) => l.nodes.filter((nd) => typeof nd.step === 'number').map((nd) => nd.id)), [lanes]);
+
+  // A new payment lands in MongoDB: refresh so its block joins the "waiting to land" queue
+  // right after its pulse arrives (the queue is the real count, not a local guess).
+  useEffect(() => {
+    if (!lastEvent?.txId) return undefined;
+    const t = setTimeout(reload, 2200);
+    return () => clearTimeout(t);
+  }, [lastEvent?.txId, reload]);
 
   // Training visual mode follows the real training-run state.
   useEffect(() => {
@@ -141,32 +147,19 @@ export default function ArchitectureTab({ lastEvent }) {
     setSelected(id);
     if (id && id !== 'databricks') sceneRef.current?.focusNode(id);
   };
-  const goStop = (i) => {
-    const idx = (i + stops.length) % stops.length;
-    setTour(idx);
-    setFocus('all');
-    pick(stops[idx]);
-  };
-  const endTour = () => { setTour(null); setAutoplay(false); setSelected(null); sceneRef.current?.resetView(); };
-
-  useEffect(() => {
-    if (!autoplay || tour == null) return undefined;
-    const t = setTimeout(() => (tour + 1 >= stops.length ? endTour() : goStop(tour + 1)), 4200);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoplay, tour]);
 
   const counts = nodes.reduce((acc, nd) => ({ ...acc, [nd.status]: (acc[nd.status] || 0) + 1 }), {});
-  const shared = { nodes, edges, selected, focus, onSelect: (id) => { setSelected(id); if (!id) setTour(null); }, showLanes: true };
+  const shared = { nodes, edges, selected, focus, onSelect: setSelected, showLanes: true };
   const fallback = <Fallback2D {...shared} />;
-  const tourNode = tour != null ? nodesById[stops[tour]] : null;
+  const f = data.flow;
+  const lastRun = f?.runs?.[0];
 
   return (
     <>
       <div className="page-head row between" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h2>System architecture</h2>
-          <div className="sub">The whole data pipeline as three lanes: real-time serving → ingestion & lakehouse → machine-learning loop. Live status from the API, Databricks and MLflow.</div>
+          <h2>Live data flow</h2>
+          <div className="sub">Three lanes: real-time scoring → ingestion & lakehouse → machine-learning loop. Every payment pulses along its real path; orange blocks are rows waiting for the next stage. Status comes live from the API, Databricks and MLflow.</div>
         </div>
         <div className="arch-counts">
           {['green', 'blue', 'yellow', 'red', 'gray'].filter((s) => counts[s]).map((s) => (
@@ -180,9 +173,6 @@ export default function ArchitectureTab({ lastEvent }) {
           {FOCUS.map((f) => <button key={f.id} role="tab" aria-selected={focus === f.id} className={focus === f.id ? 'on' : ''} onClick={() => setFocus(f.id)}>{f.label}</button>)}
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-          {tour == null
-            ? <button className="btn sm" onClick={() => { goStop(0); setAutoplay(true); }}>▶ Walk through the pipeline</button>
-            : <button className="btn ghost sm" onClick={endTour}>■ End walk-through</button>}
           {view === '3d' && <button className="btn ghost sm" onClick={() => { setSelected(null); sceneRef.current?.resetView(); }}>Reset view</button>}
           <button className="btn ghost sm" onClick={() => setListOpen((v) => !v)}>{listOpen ? 'Hide stages' : 'Show stages'}</button>
           <div className="seg">
@@ -192,6 +182,14 @@ export default function ArchitectureTab({ lastEvent }) {
         </div>
       </div>
 
+      {f && (
+        <div className="arch-hud" aria-label="Live pipeline numbers">
+          <div><b>{f.hot.lastHour}</b><span>payments · last hour</span></div>
+          <div><b>{ms(f.hot.latency.totalP95)}</b><span>p95 payment time</span></div>
+          <div className={f.goldBehind ? 'warn' : ''}><b>{f.goldBehind}</b><span>payments not in Gold yet</span></div>
+          <div><b>{lastRun ? (lastRun.result || lastRun.state).charAt(0) + (lastRun.result || lastRun.state).slice(1).toLowerCase() : '—'}</b><span>{lastRun ? `last pipeline run · ${timeAgo(lastRun.startTime)}` : 'no pipeline run yet'}</span></div>
+        </div>
+      )}
       {!webgl && <div className="flash info"><span>ℹ️</span><div>WebGL is not available in this browser, so the 2D diagram is shown. It has the same live data.</div></div>}
 
       <div className={`arch-layout ${listOpen ? 'with-list' : ''}`}>
@@ -213,20 +211,8 @@ export default function ArchitectureTab({ lastEvent }) {
             {Object.entries(STATUS).map(([k, s]) => <span key={k}><span className="dot" style={{ background: s.color }} />{s.label}</span>)}
             <span><i className="leg-line hot" />real-time</span><span><i className="leg-line cold" />lakehouse</span><span><i className="leg-line train" />ML</span><span><i className="leg-line manual" />manual / optional</span>
           </div>
-          {tourNode && (
-            <div className="tour-card">
-              <div className="faint" style={{ fontSize: 11.5 }}>Step {tour + 1} of {stops.length} · {LANES.find((l) => l.id === tourNode.lane)?.label}</div>
-              <b>{tourNode.label}</b>
-              <div className="tour-text">{tourNode.purpose}</div>
-              <div className="row" style={{ gap: 6, marginTop: 8 }}>
-                <button className="btn ghost sm" onClick={() => { setAutoplay(false); goStop(tour - 1); }}>‹ Prev</button>
-                <button className="btn ghost sm" onClick={() => setAutoplay((v) => !v)}>{autoplay ? '❚❚ Pause' : '▶ Play'}</button>
-                <button className="btn ghost sm" onClick={() => { setAutoplay(false); goStop(tour + 1); }}>Next ›</button>
-              </div>
-            </div>
-          )}
           {selected && nodesById[selected] && (
-            <DetailPanel node={nodesById[selected]} edges={edges} nodesById={nodesById} onClose={() => { setSelected(null); setTour(null); setAutoplay(false); }} onJump={pick} />
+            <DetailPanel node={nodesById[selected]} edges={edges} nodesById={nodesById} onClose={() => setSelected(null)} onJump={pick} />
           )}
         </div>
       </div>

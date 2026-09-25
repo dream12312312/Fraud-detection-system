@@ -1,6 +1,44 @@
 import React, { useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { useAdminData, useAction, PageHead, Empty, RiskBadge, Drawer, KV, Tabs, money, timeAgo, int } from '../ui.jsx';
+import { Throughput, ms } from '../flow.jsx';
+
+const SOURCES = [['HEURISTIC', 'base model (rules)', '#3b6cff'], ['ML_MODEL', 'ML model', '#8b5cf6'], ['RULES_FALLBACK', 'fallback rules (engine offline)', '#f59e0b'], ['NONE', 'never scored (stuck)', '#ef4444']];
+
+/** Hot path: throughput, measured latency and who made the decisions. */
+function ProcessingMonitor({ hot, onFilter }) {
+  if (!hot) return null;
+  const l = hot.latency;
+  const srcTotal = SOURCES.reduce((a, [k]) => a + (hot.sources24h[k] || 0), 0) || 1;
+  return (
+    <div className="grid cols-2" style={{ marginBottom: 18 }}>
+      <div className="card">
+        <div className="card-title"><h3><span className="ico">⚡</span> Payments per minute</h3><span className="faint" style={{ fontSize: 12 }}>{int(hot.lastHour)} in the last hour</span></div>
+        <Throughput perMinute={hot.perMinute} />
+      </div>
+      <div className="card">
+        <div className="card-title"><h3><span className="ico">⏱️</span> Scoring speed</h3><span className="faint" style={{ fontSize: 12 }}>{l.samples ? `last ${l.samples} payments` : ''}</span></div>
+        {l.samples ? (
+          <div className="lat-row">
+            <div className="lat" title="Round trip API → fraud engine → API"><b>{ms(l.scoreP50)}</b><span>fraud engine · median</span></div>
+            <div className="lat"><b>{ms(l.scoreP95)}</b><span>fraud engine · p95</span></div>
+            <div className="lat" title="Request received → decision saved and pushed"><b>{ms(l.totalP50)}</b><span>whole payment · median</span></div>
+            <div className="lat"><b>{ms(l.totalP95)}</b><span>whole payment · p95</span></div>
+          </div>
+        ) : <div className="faint" style={{ fontSize: 13 }}>No measurements yet. Timings are recorded for every new payment.</div>}
+        <div className="section-label">Who decided (24h)</div>
+        <div className="src-bar">{SOURCES.map(([k, , c]) => hot.sources24h[k] ? <i key={k} style={{ width: `${(hot.sources24h[k] / srcTotal) * 100}%`, background: c }} title={`${hot.sources24h[k]}`} /> : null)}</div>
+        <div className="g-legend">{SOURCES.map(([k, label, c]) => hot.sources24h[k] ? <span key={k}><i style={{ background: c }} />{label} · {hot.sources24h[k]}</span> : null)}</div>
+        {(hot.stuck > 0 || hot.awaitingCustomer > 0) && (
+          <div className="row" style={{ gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            {hot.stuck > 0 && <button className="btn sm danger" onClick={() => onFilter('PENDING_RISK_CHECK')}>{hot.stuck} stuck before scoring</button>}
+            {hot.awaitingCustomer > 0 && <button className="btn sm ghost" onClick={() => onFilter('CHALLENGED')}>{hot.awaitingCustomer} waiting for the customer</button>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const reasonText = (r) => (r || []).join(', ').replaceAll('_', ' ').toLowerCase();
 
@@ -60,6 +98,7 @@ export function TxDetail({ tx, onClose, onChanged, flash }) {
         ['Merchant / reference', tx.merchant || 'transfer'],
         ['Country', tx.country],
         ['Model version', tx.modelVersion],
+        ['Processing time', tx.timings ? `${ms(tx.timings.totalMs)} total · ${ms(tx.timings.scoreMs)} in the fraud engine` : 'not measured (older payment)'],
         ['Created', new Date(tx.createdAt).toLocaleString()]
       ]} />
     </Drawer>
@@ -69,7 +108,7 @@ export function TxDetail({ tx, onClose, onChanged, flash }) {
 const STATUSES = ['COMPLETED', 'CHALLENGED', 'BLOCKED', 'PENDING_RISK_CHECK', 'FAILED'];
 
 export default function TransactionsPage({ flash }) {
-  const { data, reload } = useAdminData({ txns: '/admin/transactions?limit=300' }, 8000);
+  const { data, reload } = useAdminData({ txns: '/admin/transactions?limit=300', flow: '/admin/dataflow' }, 8000);
   const [status, setStatus] = useState('all');
   const [source, setSource] = useState('');
   const [q, setQ] = useState('');
@@ -85,6 +124,7 @@ export default function TransactionsPage({ flash }) {
   return (
     <>
       <PageHead title="Transactions" sub="Every payment with its fraud score, decision and processing path. Click a row for details and actions." />
+      <ProcessingMonitor hot={data.flow?.hot} onFilter={setStatus} />
       <div className="toolbar">
         <Tabs value={status} onChange={setStatus} tabs={[{ id: 'all', label: 'All', count: txns.length }, ...STATUSES.map((s) => ({ id: s, label: s === 'PENDING_RISK_CHECK' ? 'Stuck' : s[0] + s.slice(1).toLowerCase(), count: counts[s] }))]} />
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
@@ -105,7 +145,7 @@ export default function TransactionsPage({ flash }) {
           : (
             <div className="table-wrap">
               <table className="data clickable">
-                <thead><tr><th>Tx</th><th>Customer</th><th>Type</th><th>Amount</th><th>Status</th><th>Risk</th><th>Decided by</th><th>Lakehouse</th><th>When</th></tr></thead>
+                <thead><tr><th>Tx</th><th>Customer</th><th>Type</th><th>Amount</th><th>Status</th><th>Risk</th><th>Decided by</th><th title="Request received → decision saved">Time</th><th>Lakehouse</th><th>When</th></tr></thead>
                 <tbody>
                   {shown.map((t) => (
                     <tr key={t._id} onClick={() => setOpen(t)}>
@@ -116,6 +156,7 @@ export default function TransactionsPage({ flash }) {
                       <td><span className={`badge ${t.status}`}>{t.status === 'PENDING_RISK_CHECK' ? 'STUCK' : t.status}</span></td>
                       <td><RiskBadge p={t.fraudProbability} /></td>
                       <td className="faint">{{ HEURISTIC: 'base model', ML_MODEL: 'ML model', RULES_FALLBACK: 'fallback', ADMIN: 'admin' }[t.decisionSource] || '—'}</td>
+                      <td className="faint">{ms(t.timings?.totalMs)}</td>
                       <td>{t.lakeLandedAt ? <span className="badge LOW" title={new Date(t.lakeLandedAt).toLocaleString()}>landed</span> : <span className="faint">—</span>}</td>
                       <td className="faint" style={{ whiteSpace: 'nowrap' }}>{timeAgo(t.createdAt)}</td>
                     </tr>

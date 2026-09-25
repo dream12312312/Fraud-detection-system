@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '../api.js';
-import { useAdminData, useAction, PageHead, Empty, BarChart, Confirm, Kpi, StateDot, ExtLink, int, timeAgo, duration } from '../ui.jsx';
-import { LakehouseArt } from '../illustrations.jsx';
+import { useAdminData, useAction, PageHead, Empty, Confirm, ExtLink, int, timeAgo } from '../ui.jsx';
+import { StageMap, Reconciliation, RunTimeline } from '../flow.jsx';
 
 export const taskTone = (t) => (!t ? 'idle' : t.result === 'SUCCESS' ? 'ok' : t.result ? 'error' : ['RUNNING', 'PENDING', 'QUEUED'].includes(t.state) ? 'running' : 'idle');
 const TABLES = [
@@ -15,26 +15,12 @@ const TABLES = [
   ['ML', 'ml_features', 'Latest engineered features + split']
 ];
 
-function Step({ n, title, sub, state, children, actions }) {
-  return (
-    <section className={`pstep ${state}`}>
-      <div className="pstep-rail"><div className="pstep-n">{n}</div></div>
-      <div className="card pstep-card">
-        <div className="card-title" style={{ flexWrap: 'wrap', gap: 10 }}>
-          <div><h3 className="row" style={{ gap: 8 }}><StateDot state={state} /> {title}</h3>{sub && <div className="faint" style={{ fontSize: 12.5, marginTop: 2 }}>{sub}</div>}</div>
-          {actions && <div className="row" style={{ gap: 8 }}>{actions}</div>}
-        </div>
-        {children}
-      </div>
-    </section>
-  );
-}
-
 export default function PipelinePage({ flash, go }) {
-  const { data, reload } = useAdminData({ pipeline: '/admin/pipeline' }, 6000);
+  const { data, reload } = useAdminData({ pipeline: '/admin/pipeline', flow: '/admin/dataflow' }, 8000);
   const [busy, run] = useAction(flash);
   const [confirmRun, setConfirmRun] = useState(false);
   const p = data.pipeline;
+  const flow = data.flow;
   if (!p) return <div className="card"><p className="faint">Loading pipeline…</p></div>;
 
   const db = p.databricks ?? {};
@@ -44,103 +30,59 @@ export default function PipelinePage({ flash, go }) {
   const job = (db.jobs || []).find((j) => j.name?.includes('medallion'));
   const latest = job?.latestRun;
   const running = ['PENDING', 'QUEUED', 'RUNNING'].includes(latest?.state);
-  const t = p.totals24h ?? {};
-  const series = p.series ?? [];
+  const waiting = latest?.tasks?.find((t) => t.message && t.state !== 'TERMINATED');
 
   const land = () => run('land', () => api('/admin/lakehouse/land', { method: 'POST' }), (r) => r.rows ? `Landed ${r.rows} transaction(s) → ${r.path.split('/').slice(-2).join('/')}` : r.message).then(reload);
   const runPipeline = () => run('run', () => api('/admin/databricks/pipeline/run', { method: 'POST', body: { confirm: true } }), 'Pipeline started on Databricks.').then(() => { setConfirmRun(false); reload(); });
 
   return (
     <>
-      <section className="hero-panel slim">
-        <div className="hero-copy">
-          <div className="eyebrow">Data engineering</div>
-          <h1>Data pipeline</h1>
-          <p>MongoDB → landing volume → Bronze → Silver → Gold. Each step below shows its real state and lets you move data to the next one.</p>
-        </div>
-        <LakehouseArt className="hero-art" />
-      </section>
+      <PageHead title="Data pipeline" sub="MongoDB → landing volume → Bronze → Silver → Gold. Counts, backlogs and timings are read live from MongoDB, the Databricks Jobs API and Unity Catalog.">
+        <button className="btn sm ghost" disabled={!!busy || !lake.pending} onClick={land} title="Export settled transactions as NDJSON into the landing volume">{busy === 'land' ? 'Landing…' : `📦 Land ${lake.pending || 0} new`}</button>
+        {job
+          ? <button className="btn sm" disabled={!!busy || running} onClick={() => setConfirmRun(true)}>{running ? 'Running on Databricks…' : '▶ Run pipeline'}</button>
+          : <button className="btn sm" onClick={() => go('databricks')}>Set up Databricks</button>}
+      </PageHead>
 
-      <div className="kpi-row" style={{ marginBottom: 18 }}>
-        <Kpi label="Processed 24h" value={int(t.processed)} />
-        <Kpi label="Waiting to land" value={int(lake.pending)} tone={lake.pending ? 'warn' : undefined} />
-        <Kpi label="Bronze rows" value={int(mc.bronze_events)} />
-        <Kpi label="Silver rows" value={int(mc.silver_events)} />
-        <Kpi label="Quarantined" value={int(mc.silver_quarantine)} tone={mc.silver_quarantine ? 'warn' : undefined} />
-        <Kpi label="Gold predictions" value={int(mc.gold_fraud_predictions)} />
+      <div className="card">
+        <div className="card-title">
+          <h3><span className="ico">🌊</span> Where the data is now</h3>
+          <span className="faint" style={{ fontSize: 12 }}>blocks between stages are rows waiting for the next step</span>
+        </div>
+        <StageMap flow={flow} />
+        {waiting && <div className="card-hint">Databricks says: {waiting.message}</div>}
       </div>
 
-      <div className="psteps">
-        <Step n="1" title="Operational source · MongoDB" state="ok" sub="Every payment is written here first, with its fraud decision and the features that were scored.">
-          <div className="grid cols-2">
-            <div>
-              <div className="section-label" style={{ marginTop: 0 }}>Transactions per hour (24h)</div>
-              {series.length ? <BarChart height={130} data={series.map((s) => ({ label: `${new Date(s.hour).getHours()}h`, value: s.total, sub: `${s.completed}✓ ${s.challenged}⚠ ${s.blocked}⛔` }))} />
-                : <Empty icon="📈" title="No traffic in 24h" text="Hourly volume appears once payments flow." />}
-            </div>
-            <div>
-              <div className="section-label" style={{ marginTop: 0 }}>Blocked per hour (24h)</div>
-              {series.length ? <BarChart height={130} color="var(--danger)" data={series.map((s) => ({ label: `${new Date(s.hour).getHours()}h`, value: s.blocked }))} />
-                : <Empty icon="🚨" title="Nothing blocked" text="Blocked payments per hour show here." />}
-            </div>
+      <div className="card" style={{ marginTop: 18 }}>
+          <div className="card-title"><h3><span className="ico">🔀</span> Where the rows went · last successful run</h3></div>
+          {flow ? <Reconciliation rec={flow.reconciliation} /> : <p className="faint">Loading…</p>}
+          <div className="card-hint">Numbers are the notebooks’ own exit values (bronze / silver / gold task outputs), checked against each other.</div>
+      </div>
+      <div className="card" style={{ marginTop: 18 }}>
+          <div className="card-title">
+            <h3><span className="ico">⏱️</span> Run timeline</h3>
+            <ExtLink href={host && job && `${host}/jobs/${job.jobId}`}>Job in Databricks</ExtLink>
           </div>
-        </Step>
+          {flow?.runs ? <RunTimeline runs={flow.runs} order={['bronze', 'silver', 'gold']} host={host} jobId={job?.jobId} />
+            : job ? <p className="faint">Loading…</p> : <Empty icon="🧱" title="Job not deployed" text="Set it up on the Databricks page." />}
+          <div className="card-hint">Grey is time spent waiting for serverless compute before the first task starts.</div>
+      </div>
 
-        <Step n="2" title="Landing · Unity Catalog volume" state={!db.configured ? 'missing' : lake.pending ? 'warn' : 'ok'}
-          sub={<>Settled transactions are exported as NDJSON into <span className="mono">{lake.volume}</span>{p.kafka?.enabled ? ' (Kafka bridge also active)' : ' (Kafka is off, so this export is the ingestion path)'}.</>}
-          actions={<button className="btn sm" disabled={!!busy || !lake.pending} onClick={land}>{busy === 'land' ? 'Landing…' : `Land ${lake.pending || 0} new`}</button>}>
-          <div className="row" style={{ gap: 24, flexWrap: 'wrap', marginBottom: 10 }}>
-            <div><div className="big-num">{int(lake.landed)}</div><div className="faint">rows landed</div></div>
-            <div><div className="big-num" style={{ color: lake.pending ? 'var(--warn)' : undefined }}>{int(lake.pending)}</div><div className="faint">waiting</div></div>
-            <div><div className="big-num">{lake.lastBatch ? timeAgo(lake.lastBatch.createdAt) : '—'}</div><div className="faint">last landing</div></div>
-          </div>
-          {lake.recent?.length > 0 && (
-            <table className="data">
+      <div className="grid cols-2" style={{ marginTop: 18 }}>
+        <div className="card">
+          <div className="card-title"><h3><span className="ico">📦</span> Landing files</h3><span className="mono faint" style={{ fontSize: 11.5 }}>{lake.volume}</span></div>
+          {lake.recent?.length ? (
+            <div className="table-wrap"><table className="data">
               <thead><tr><th>File</th><th>Rows</th><th>Size</th><th>When</th></tr></thead>
               <tbody>{lake.recent.map((b) => (
                 <tr key={b._id}><td className="mono" title={b.path}>{b.error ? <span style={{ color: 'var(--danger)' }}>failed: {b.error}</span> : b.path.split('/').slice(-2).join('/')}</td><td>{b.rows}</td><td className="faint">{b.bytes ? `${(b.bytes / 1024).toFixed(1)} KB` : '—'}</td><td className="faint">{timeAgo(b.createdAt)}</td></tr>
               ))}</tbody>
-            </table>
-          )}
-        </Step>
-
-        <Step n="3" title="Medallion job · Bronze → Silver → Gold" state={!job ? 'missing' : running ? 'running' : taskTone(latest && { result: latest.resultState, state: latest.state })}
-          sub={job ? <>Databricks job <b>{job.name}</b> on serverless compute. Latest run {latest ? `${latest.state}${latest.resultState ? ` · ${latest.resultState}` : ''} · ${timeAgo(latest.startTime)}` : 'never'}.</> : 'Not deployed yet — set it up on the Databricks page.'}
-          actions={job ? <>
-            <ExtLink href={host && `${host}/jobs/${job.jobId}`}>Job in Databricks</ExtLink>
-            <button className="btn sm" disabled={!!busy || running} onClick={() => setConfirmRun(true)}>{running ? 'Running…' : 'Run pipeline'}</button>
-          </> : <button className="btn sm" onClick={() => go('databricks')}>Set up Databricks</button>}>
-          {latest?.tasks?.length ? (
-            <div className="task-chain">
-              {latest.tasks.map((tk, i) => (
-                <React.Fragment key={tk.key}>
-                  {i > 0 && <div className={`task-link ${taskTone(latest.tasks[i - 1])}`} />}
-                  <a className={`task ${taskTone(tk)}`} href={host ? `${host}/jobs/${job.jobId}/runs/${tk.taskRunId}` : undefined} target="_blank" rel="noopener noreferrer">
-                    <div className="task-name">{{ bronze: '🥉 Bronze', silver: '🥈 Silver', gold: '🥇 Gold' }[tk.key] || tk.key}</div>
-                    <div className="task-state">{tk.result || tk.state}</div>
-                    <div className="faint" style={{ fontSize: 11.5 }}>{tk.startedAt ? duration(tk.startedAt, tk.finishedAt) : 'waiting'}</div>
-                    {tk.message && tk.state !== 'TERMINATED' && <div className="faint" style={{ fontSize: 11 }}>{tk.message}</div>}
-                  </a>
-                </React.Fragment>
-              ))}
-            </div>
-          ) : <Empty icon="🧱" title="No runs yet" text="Land some transactions, then run the pipeline." />}
-          {job?.recentRuns?.length > 1 && (
-            <>
-              <div className="section-label">Recent runs</div>
-              <div className="run-pills">
-                {job.recentRuns.map((r) => (
-                  <a key={r.runId} className={`run-pill ${r.result === 'SUCCESS' ? 'ok' : r.result ? 'error' : 'running'}`} href={host ? `${host}/jobs/${job.jobId}/runs/${r.runId}` : undefined} target="_blank" rel="noopener noreferrer">
-                    {r.result || r.state} · {timeAgo(r.startTime)}{r.durationS != null ? ` · ${r.durationS}s` : ''}
-                  </a>
-                ))}
-              </div>
-            </>
-          )}
-        </Step>
-
-        <Step n="4" title="Lakehouse tables" state={mc.gold_fraud_predictions != null ? 'ok' : mc.bronze_events != null ? 'warn' : 'missing'}
-          sub={<>Row counts from Unity Catalog <span className="mono">{db.catalog}</span> via the SQL warehouse (cached 5 min, refreshed when a job finishes).</>}>
+            </table></div>
+          ) : <Empty icon="📦" title="Nothing landed yet" text="Press “Land” to export settled transactions." />}
+          <div className="card-hint">{p.kafka?.enabled ? 'The Kafka bridge also writes into this volume.' : 'Kafka is off, so this export is the ingestion path.'}</div>
+        </div>
+        <div className="card">
+          <div className="card-title"><h3><span className="ico">🗃️</span> Lakehouse tables</h3><span className="mono faint" style={{ fontSize: 11.5 }}>{db.catalog}</span></div>
           <div className="table-wrap"><table className="data">
             <thead><tr><th>Layer</th><th>Table</th><th>Contents</th><th style={{ textAlign: 'right' }}>Rows</th></tr></thead>
             <tbody>{TABLES.map(([layer, tbl, what]) => (
@@ -152,7 +94,8 @@ export default function PipelinePage({ flash, go }) {
               </tr>
             ))}</tbody>
           </table></div>
-        </Step>
+          <div className="card-hint">Row counts via the SQL warehouse, cached 5 min and refreshed when a job finishes.</div>
+        </div>
       </div>
 
       {confirmRun && (

@@ -218,6 +218,51 @@ function TracePulse({ curves, color, onDone }) {
   ));
 }
 
+/* ---------- backlog: rows waiting between two stages, as record blocks on the floor ---------- */
+
+const QUEUE_MAX = 27; // 3 layers of 3x3; the label always carries the real number
+
+function QueueBlock({ index, material }) {
+  const ref = useRef();
+  const target = useMemo(() => {
+    const layer = Math.floor(index / 9); const cell = index % 9;
+    return new THREE.Vector3(((cell % 3) - 1) * 0.36, 0.2 + layer * 0.33, (Math.floor(cell / 3) - 1) * 0.36);
+  }, [index]);
+  useFrame(() => {
+    const m = ref.current;
+    if (!m) return;
+    if (m.userData.dropped == null) { m.position.set(target.x, target.y + 2.2, target.z); m.userData.dropped = false; }
+    if (!m.userData.dropped) {
+      m.position.y = THREE.MathUtils.lerp(m.position.y, target.y, 0.12);
+      if (Math.abs(m.position.y - target.y) < 0.002) { m.position.y = target.y; m.userData.dropped = true; }
+    }
+  });
+  return (
+    <mesh ref={ref} material={material}>
+      <boxGeometry args={[0.3, 0.28, 0.3]} />
+    </mesh>
+  );
+}
+
+function Queue3D({ position, n, dimmed }) {
+  const count = Math.min(n, QUEUE_MAX);
+  const material = useMemo(() => new THREE.MeshStandardMaterial({ color: '#ff8a3d', emissive: '#ff6a1a', emissiveIntensity: 0.35, roughness: 0.45, metalness: 0.1, transparent: true }), []);
+  useEffect(() => { material.opacity = dimmed ? 0.15 : 1; }, [material, dimmed]);
+  useEffect(() => () => material.dispose(), [material]);
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.66, 0.73, 40]} />
+        <meshBasicMaterial color={n ? '#ff8a3d' : '#64748b'} transparent opacity={dimmed ? 0.1 : n ? 0.8 : 0.35} toneMapped={false} />
+      </mesh>
+      {Array.from({ length: count }).map((_, i) => <QueueBlock key={i} index={i} material={material} />)}
+      {count > 0 && !dimmed && <Glow color="#ff8a3d" scale={2} opacity={0.18} position={[0, 0.3, 0]} />}
+    </group>
+  );
+}
+
+const queuePoint = (curve) => { const p = curve.getPoint(0.5); return [p.x, 0, p.z]; };
+
 /* ---------- environment ---------- */
 
 function Stars() {
@@ -408,6 +453,10 @@ function SceneContents({ nodes, edges, platform, selected, hovered, focus, onSel
         return <Edge key={key} edge={e} curve={curves[key]} dimmed={(connected && !touches) || !inFocus(e)} emphasized={touches} trainingActive={trainingActive} />;
       })}
 
+      {edges.filter((e) => e.queue && curves[`${e.from}>${e.to}`]).map((e) => (
+        <Queue3D key={`q-${e.from}>${e.to}`} position={queuePoint(curves[`${e.from}>${e.to}`])} n={e.queue.n} dimmed={(connected && !(connected.has(e.from) && connected.has(e.to))) || !inFocus(e)} />
+      ))}
+
       {nodes.map((nd) => (
         <Node key={nd.id} node={nd} selected={selected === nd.id} hovered={hovered === nd.id}
           dimmed={(connected && !connected.has(nd.id)) || !nodeInFocus(nd)} onSelect={onSelect} onHover={onHover} />
@@ -447,7 +496,7 @@ const Scene3D = forwardRef(function Scene3D(props, ref) {
     if (!lastEvent?.txId || lastEvent.txId === lastSeen.current) return;
     lastSeen.current = lastEvent.txId;
     const color = DECISION_COLOR[lastEvent.status] || '#60a5fa';
-    const path = engineUp ? ['user-app>api', 'api>fraud-engine', 'fraud-engine>alerts', 'alerts>admin-app'] : ['user-app>api', 'api>mongo'];
+    const path = engineUp ? ['user-app>api', 'api>fraud-engine', 'fraud-engine>alerts'] : ['user-app>api'];
     setTraces((prev) => [...prev, { key: `${lastEvent.txId}-${Date.now()}`, color, path }, { key: `${lastEvent.txId}-db-${Date.now()}`, color, path: ['api>mongo'] }].slice(-8));
   }, [lastEvent, engineUp]);
 
@@ -457,10 +506,15 @@ const Scene3D = forwardRef(function Scene3D(props, ref) {
     if (showLanes && !compact) {
       LANES.forEach((l) => a.push({ id: `lane:${l.id}`, pos: [l.tag.x, 0.3, l.z], align: l.tag.align, middle: true }));
     }
+    // Backlog labels sit just in front of their block stack.
+    edges.filter((e) => e.queue).forEach((e) => {
+      const A = nodes.find((x) => x.id === e.from); const B = nodes.find((x) => x.id === e.to);
+      if (A && B) a.push({ id: `queue:${e.from}>${e.to}`, pos: [(A.pos[0] + B.pos[0]) / 2, 0.05, (A.pos[2] + B.pos[2]) / 2 + 0.75], below: true });
+    });
     // Platform title on its front-left corner, clear of the node labels.
     if (platform) a.push({ id: 'databricks', pos: [PLATFORM[0] + 0.3, 0.1, PLATFORM[3] - 0.2], align: 'left', below: true });
     return a;
-  }, [nodes, showLanes, compact, bounds, platform]);
+  }, [nodes, edges, showLanes, compact, bounds, platform]);
 
   return (
     <div className={`arch3d-wrap ${compact ? 'compact' : ''}`}>
@@ -485,6 +539,11 @@ const Scene3D = forwardRef(function Scene3D(props, ref) {
             <span className="dot" style={{ background: STATUS[platform.status]?.color }} /> {platform.label} · {platform.statusLabel}
           </div>
         )}
+        {edges.filter((e) => e.queue?.n > 0).map((e) => (
+          <div key={`q-${e.from}>${e.to}`} ref={(el) => { labelEls.current[`queue:${e.from}>${e.to}`] = el; }} className={`queue-tag ${e.queue.n ? 'has' : ''}`}>
+            <b>{e.queue.n.toLocaleString()}</b> {e.queue.label}
+          </div>
+        ))}
         {nodes.map((nd) => {
           const dim = (connected && !connected.has(nd.id)) || !nodeInFocus(nd);
           const color = STATUS[nd.status]?.color ?? STATUS.gray.color;

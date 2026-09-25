@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../api.js';
-import { useAdminData, useAction, Confirm, StateDot, ExtLink, Empty, timeAgo } from '../ui.jsx';
-import { LakehouseArt } from '../illustrations.jsx';
+import { useAdminData, useAction, PageHead, Confirm, StateDot, ExtLink, Empty, timeAgo } from '../ui.jsx';
 
 /**
  * Databricks control center: what exists in the workspace, one button to
@@ -24,23 +23,11 @@ export default function DatabricksPage({ flash, go }) {
 
   return (
     <>
-      <section className="hero-panel slim">
-        <div className="hero-copy">
-          <div className="eyebrow">Platform</div>
-          <h1>Databricks workspace</h1>
-          <p>
-            {st?.configured
-              ? <>Connected to <a href={host} target="_blank" rel="noopener noreferrer">{host?.replace(/^https?:\/\//, '')}</a> as <b>{st.user || '…'}</b>. The API server holds the token; this page only sends commands through it.</>
-              : 'Not configured. Set DATABRICKS_HOST and DATABRICKS_TOKEN in .env and restart the API.'}
-          </p>
-          <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-            <button className="btn sm" disabled={!st?.configured || !!busy} onClick={() => setConfirm(true)}>{busy === 'prov' ? 'Syncing…' : st?.ready ? '↻ Sync notebooks & jobs' : '⚡ Set up workspace'}</button>
-            <button className="btn ghost sm" onClick={() => go('pipeline')}>Data pipeline</button>
-            <button className="btn ghost sm" onClick={() => go('training')}>Model training</button>
-          </div>
-        </div>
-        <LakehouseArt className="hero-art" />
-      </section>
+      <PageHead title="Databricks workspace" sub={st?.configured
+        ? <>Connected to <a href={host} target="_blank" rel="noopener noreferrer">{host?.replace(/^https?:\/\//, '')}</a> as <b>{st.user || '…'}</b>. The API server holds the token; this page only sends commands through it.</>
+        : 'Not configured. Set DATABRICKS_HOST and DATABRICKS_TOKEN in .env and restart the API.'}>
+        <button className="btn sm" disabled={!st?.configured || !!busy} onClick={() => setConfirm(true)}>{busy === 'prov' ? 'Syncing…' : st?.ready ? '↻ Sync notebooks & jobs' : '⚡ Set up workspace'}</button>
+      </PageHead>
 
       <div className="grid sidebar">
         <div className="card">

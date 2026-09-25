@@ -47,7 +47,6 @@ const LAYOUT = {
   api: { pos: [-9.5, 0, -7], lane: 'hot', step: 2, lift: 1 },
   'fraud-engine': { pos: [-5, 0, -7], lane: 'hot', step: 3 },
   alerts: { pos: [-0.5, 0, -7], lane: 'hot', step: 4, lift: 1 },
-  'admin-app': { pos: [4, 0, -7], lane: 'hot', step: 5 },
 
   mongo: { pos: [-9.5, 0, 0], lane: 'cold', step: 1 },
   landing: { pos: [-5.2, 0, -0.8], lane: 'cold', step: 2, lift: 1 },
@@ -90,7 +89,7 @@ export function taskStatus(t, fallbackLabel = 'NOT RUN YET') {
   return { status: 'gray', label: t.state || fallbackLabel };
 }
 
-export function buildArchitecture({ system, pipeline, training, mlflow, stats, apiOnline }) {
+export function buildArchitecture({ system, pipeline, training, mlflow, stats, flow, apiOnline }) {
   const db = pipeline?.databricks ?? {};
   const host = db.host || null;
   const jobs = db.jobs || [];
@@ -109,6 +108,7 @@ export function buildArchitecture({ system, pipeline, training, mlflow, stats, a
   const exp = mlflow?.experiment ?? null;
   const versions = mlflow?.modelVersions ?? [];
   const medRunning = ['PENDING', 'QUEUED', 'RUNNING'].includes(medJob?.latestRun?.state);
+  const waitingBronze = flow?.stages?.find((st) => st.id === 'bronze')?.waitingIn ?? null;
 
   const jobUrl = (job) => (host && job ? `${host}/jobs/${job.jobId}` : null);
   const taskUrl = (job, t) => (host && job && t?.taskRunId ? `${host}/jobs/${job.jobId}/runs/${t.taskRunId}` : null);
@@ -184,11 +184,6 @@ export function buildArchitecture({ system, pipeline, training, mlflow, stats, a
       metrics: [['Fraud alerts', fmtInt(stats?.fraudAlerts)], ['Blocked (24h)', fmtInt(pipeline?.totals24h?.blocked)], ['Review (24h)', fmtInt(pipeline?.totals24h?.challenged)]]
     },
     {
-      id: 'admin-app', label: 'Admin Console', layer: 'client', shape: 'screen', status: 'green', statusLabel: 'YOU ARE HERE',
-      purpose: 'This console (port 5174): operations, data pipeline, training and Databricks control.',
-      metrics: [['Refresh', 'polling 5–15 s + Socket.IO live feed']]
-    },
-    {
       id: 'mongo', label: 'MongoDB', layer: 'database', shape: 'database',
       status: system?.mongo?.connected ? 'green' : system ? 'red' : 'gray', statusLabel: system?.mongo?.connected ? 'CONNECTED' : system ? 'DISCONNECTED' : CHECKING,
       value: system ? `${fmtInt(system.counts?.totalTx)} tx` : null,
@@ -260,7 +255,7 @@ export function buildArchitecture({ system, pipeline, training, mlflow, stats, a
       metrics: [['Model', mlflow?.registeredModel || '—'], ['Versions', versions.length], ['Deployment', 'manual — base model stays live']],
       links: [host && mlflow?.registeredModel && { label: 'Open model in Unity Catalog', url: `${host}/explore/data/models/${mlflow.registeredModel.replaceAll('.', '/')}` }].filter(Boolean)
     }
-  ].map((node) => ({ ...node, ...LAYOUT[node.id] }));
+  ].filter((node) => kafkaOn || !['kafka', 'bridge'].includes(node.id)).map((node) => ({ ...node, ...LAYOUT[node.id] }));
 
   const databricks = {
     id: 'databricks', label: 'Databricks workspace', layer: 'databricks', shape: 'platform',
@@ -279,14 +274,15 @@ export function buildArchitecture({ system, pipeline, training, mlflow, stats, a
     { from: 'user-app', to: 'api', label: 'REST transfer', active: apiOnline, flow: 'hot' },
     { from: 'api', to: 'fraud-engine', label: 'POST /score', active: feUp, flow: 'hot' },
     { from: 'fraud-engine', to: 'alerts', label: 'decision', active: feUp, flow: 'hot' },
-    { from: 'alerts', to: 'admin-app', label: 'live feed', active: apiOnline, flow: 'hot' },
     { from: 'api', to: 'mongo', label: 'write transaction + features', active: Boolean(system?.mongo?.connected), flow: 'hot' },
-    { from: 'mongo', to: 'landing', label: 'settled transactions', active: Boolean(lake?.lastBatch), flow: 'cold' },
+    { from: 'mongo', to: 'landing', label: 'settled transactions', active: Boolean(lake?.lastBatch), flow: 'cold', queue: lake ? { n: lake.pending, label: 'waiting to land' } : null },
     { from: 'landing', to: 'volume', label: 'Files API · NDJSON', active: Boolean(lake?.lastBatch), flow: 'cold' },
-    { from: 'api', to: 'kafka', label: 'txn.events.raw', active: kafkaOn, flow: 'cold', optional: true },
-    { from: 'kafka', to: 'bridge', label: 'consume', active: kafkaOn, flow: 'cold', optional: true },
-    { from: 'bridge', to: 'volume', label: 'Files API', active: kafkaOn && dbxConfigured, flow: 'cold', optional: true },
-    { from: 'volume', to: 'bronze', label: 'Auto Loader', active: n(mc.bronze_events) != null, running: medTasks.bronze?.state === 'RUNNING', flow: 'cold' },
+    ...(kafkaOn ? [
+      { from: 'api', to: 'kafka', label: 'txn.events.raw', active: true, flow: 'cold', optional: true },
+      { from: 'kafka', to: 'bridge', label: 'consume', active: true, flow: 'cold', optional: true },
+      { from: 'bridge', to: 'volume', label: 'Files API', active: dbxConfigured, flow: 'cold', optional: true }
+    ] : []),
+    { from: 'volume', to: 'bronze', label: 'Auto Loader', active: n(mc.bronze_events) != null, running: medTasks.bronze?.state === 'RUNNING', flow: 'cold', queue: waitingBronze != null ? { n: waitingBronze, label: 'waiting for Bronze' } : null },
     { from: 'bronze', to: 'silver', label: 'clean + validate', active: n(mc.silver_events) != null, running: medTasks.silver?.state === 'RUNNING', flow: 'cold' },
     { from: 'silver', to: 'gold', label: 'aggregate', active: n(mc.gold_fraud_predictions) != null, running: medTasks.gold?.state === 'RUNNING', flow: 'cold' },
     { from: 'silver', to: 'dataset', label: 'platform_transactions dataset', active: trainingActive && cur?.dataset === 'platform_transactions', flow: 'train' },
