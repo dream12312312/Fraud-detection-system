@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 const money = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const short = (n) => (n >= 1000 ? `$${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `$${Math.round(n)}`);
@@ -144,21 +144,31 @@ export function WhereMoneyWent({ txns, beneficiaries }) {
 
 /** The payment's risk score on the engine's three zones: approve, confirm, block. */
 export function RiskGauge({ prob }) {
+  // the needle and the score arc sweep in from 0 once mounted
+  const [shown, setShown] = useState(0);
+  useEffect(() => { const id = requestAnimationFrame(() => setShown(prob ?? 0)); return () => cancelAnimationFrame(id); }, [prob]);
   if (prob == null) return null;
   const p = Math.min(Math.max(prob, 0), 1);
+  const s = Math.min(Math.max(shown, 0), 1);
   const pt = (v, r) => { const a = Math.PI * (1 - v); return [100 + r * Math.cos(a), 100 - r * Math.sin(a)]; };
-  const arc = (a, b) => { const [x1, y1] = pt(a, 80); const [x2, y2] = pt(b, 80); return `M${x1} ${y1} A80 80 0 0 1 ${x2} ${y2}`; };
-  const [nx, ny] = pt(p, 66);
+  const arc = (a, b, r = 80) => { const [x1, y1] = pt(a, r); const [x2, y2] = pt(b, r); return `M${x1} ${y1} A${r} ${r} 0 0 1 ${x2} ${y2}`; };
   const zone = p >= BLOCK_AT ? 'block' : p >= REVIEW_AT ? 'review' : 'approve';
+  const tick = (v) => { const [x1, y1] = pt(v, 90); const [x2, y2] = pt(v, 70); const [tx, ty] = pt(v, 100); return { x1, y1, x2, y2, tx, ty }; };
   return (
     <div className="gauge">
       <svg viewBox="0 0 200 118" role="img" aria-label={`Risk score ${Math.round(p * 100)} percent: ${zone}`}>
         <path d={arc(0, REVIEW_AT)} className="gz approve" />
         <path d={arc(REVIEW_AT, BLOCK_AT)} className="gz review" />
         <path d={arc(BLOCK_AT, 1)} className="gz block" />
-        <line x1="100" y1="100" x2={nx} y2={ny} className="g-needle" />
-        <circle cx="100" cy="100" r="6" className="g-hub" />
-        <text x="100" y="86" className={`g-v ${zone}`}>{Math.round(p * 100)}%</text>
+        <path d={arc(0, 1, 64)} className="g-track" />
+        <path d={arc(0, 1, 64)} className={`g-fill ${zone}`} pathLength="1" style={{ strokeDashoffset: 1 - s }} />
+        {[REVIEW_AT, BLOCK_AT].map((v) => { const t = tick(v); return <line key={v} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} className="g-tick" />; })}
+        <g className="g-needle-g" style={{ transform: `rotate(${s * 180}deg)` }}>
+          <line x1="100" y1="100" x2="38" y2="100" className="g-needle" />
+        </g>
+        <circle cx="100" cy="100" r="7" className="g-hub" />
+        <circle cx="100" cy="100" r="2.5" className="g-hub-in" />
+        <text x="100" y="84" className={`g-v ${zone}`}>{Math.round(p * 100)}%</text>
       </svg>
       <div className="gauge-keys">
         <span className={zone === 'approve' ? 'on approve' : ''}>under 30% · approved</span>

@@ -665,15 +665,7 @@ function TransferTab({ data, flashMsg, reload, onDecide }) {
               <p style={{ color: 'var(--text-dim)', fontSize: 13.5 }}>After you press <b>Send payment</b>, every step your payment goes through shows up here: the risk signals we measured, the fraud-engine score, the decision and where the data goes next.</p>
             </>
           )
-          : (
-            <>
-              <div className="row between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-                <span className="mono">{shown.txId}</span>
-                <span className="row" style={{ gap: 6 }}><span className={`badge ${shown.status}`}>{shown.status}</span><RiskBadge level={shown.riskLevel} prob={shown.fraudProbability} /></span>
-              </div>
-              <PaymentJourney tx={shown} onDecide={onDecide} />
-            </>
-          )}
+          : <PaymentJourney tx={shown} onDecide={onDecide} />}
       </div>
     </div>
   );

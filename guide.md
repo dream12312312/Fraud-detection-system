@@ -67,8 +67,14 @@ transactions, 7-day spending chart and your latest alerts.
 1. Go to **Payees** and add a payee (nickname + account number).
 2. Go to **Send money**, pick the payee, enter an amount and country, then **Send payment**.
 3. Every payment is scored in real time by the fraud engine. The panel
-   **What happened to your payment** shows each step: risk signals measured,
-   the fraud-engine score, the decision, and when it was added to the data lake.
+   **What happened to your payment** shows:
+   - a coloured summary card (sent, on hold or stopped) with the amount;
+   - the payment's path (you → signals → fraud check → decision → data lake), with how
+     long the decision took and how much of that was the fraud check;
+   - **Risk score**: a gauge with the approve / confirm / block zones and the reasons;
+   - **What we checked**: the five signals the engine measures (amount vs. your 30-day
+     average, payee, destination, payments in the last hour, time of day), each drawn
+     against the line the engine uses and marked *normal* or *unusual*.
 4. In **Transactions**, click any payment to see the same step-by-step path.
 
 ## 7. Transaction statuses
