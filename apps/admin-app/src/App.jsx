@@ -12,6 +12,7 @@ import DatabricksPage from './pages/DatabricksPage.jsx';
 import SystemPage from './pages/SystemPage.jsx';
 import { ShieldArt } from './illustrations.jsx';
 import { ThemeToggle } from './theme.jsx';
+import { AuthBackdrop } from './authbg.jsx';
 import './styles.css';
 import './console.css';
 
@@ -37,7 +38,7 @@ function Login({ onAuth }) {
   };
 
   return (
-    <div className="auth-wrap">
+    <div className="auth-wrap"><AuthBackdrop />
       <div className="auth-split">
         <div className="auth-side">
           <ShieldArt className="auth-art" />
@@ -229,7 +230,7 @@ export default function App() {
 
   if (booting) {
     return (
-      <div className="auth-wrap">
+      <div className="auth-wrap"><AuthBackdrop />
         <div className="auth-card" style={{ textAlign: 'center' }}>
           <div className="logo-big">🛡️</div>
           <p style={{ color: 'var(--text-dim)' }}>Verifying admin session…</p>

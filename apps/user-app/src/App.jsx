@@ -4,6 +4,7 @@ import { api, saveSession, clearSession, verifySession, setAccessToken, setSessi
 import { PaymentJourney, ProtectionStrip } from './journey.jsx';
 import { ShieldArt, PipelineArt } from './illustrations.jsx';
 import { ThemeToggle } from './theme.jsx';
+import { AuthBackdrop } from './authbg.jsx';
 import { MoneyChart, WhereMoneyWent, RiskMap, SignalPreview } from './charts.jsx';
 // note: the component-local useFlashSafe below replaces lib.js's useFlash so the
 // flash timer is cancellable (avoids an older flash wiping a newer one)
@@ -80,7 +81,7 @@ function AuthScreen({ onAuth }) {
 
   if (mode === 'pending') {
     return (
-      <div className="auth-wrap">
+      <div className="auth-wrap"><AuthBackdrop />
         <div className="auth-card">
           <div className="logo-big">🛡️</div>
           <h1>Almost there</h1>
@@ -102,7 +103,7 @@ function AuthScreen({ onAuth }) {
   }
 
   return (
-    <div className="auth-wrap">
+    <div className="auth-wrap"><AuthBackdrop />
       <div className="auth-card">
         <div className="logo-big">🛡️</div>
         <h1>SentinelPay</h1>
@@ -245,7 +246,7 @@ export default function App() {
 
   if (booting) {
     return (
-      <div className="auth-wrap">
+      <div className="auth-wrap"><AuthBackdrop />
         <div className="auth-card" style={{ textAlign: 'center' }}>
           <div className="logo-big">🛡️</div>
           <p style={{ color: 'var(--text-dim)' }}>Loading SentinelPay…</p>
@@ -289,7 +290,7 @@ function ChangePasswordScreen({ user, onDone, onLogout }) {
   };
 
   return (
-    <div className="auth-wrap">
+    <div className="auth-wrap"><AuthBackdrop />
       <div className="auth-card">
         <div className="logo-big">🔐</div>
         <h1>Set your own password</h1>

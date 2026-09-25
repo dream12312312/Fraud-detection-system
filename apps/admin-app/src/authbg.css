@@ -1,0 +1,23 @@
+/* animated sign-in backdrop: data flowing through the lakehouse layers */
+.auth-wrap { position: relative; overflow: hidden; isolation: isolate; }
+.auth-wrap > :not(.adb) { position: relative; z-index: 1; }
+.auth-wrap .auth-card { backdrop-filter: blur(6px); box-shadow: 0 24px 60px rgba(5, 12, 30, .5); }
+:root[data-theme="light"] .auth-wrap .auth-card { box-shadow: 0 24px 60px rgba(31, 56, 112, .18); }
+.auth-wrap .auth-side {
+  padding: 22px 24px; border-radius: 18px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 72%, transparent); backdrop-filter: blur(8px);
+}
+
+.adb { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.adb-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.adb-gridline { fill: none; stroke: var(--text-faint); stroke-opacity: .12; stroke-width: 1; }
+.adb-band { opacity: .05; }
+.adb-sep { stroke: var(--text-faint); stroke-opacity: .22; stroke-dasharray: 3 8; }
+.adb-label { font-size: 15px; font-weight: 800; letter-spacing: .3em; text-anchor: middle; opacity: .55; }
+.adb-lane { fill: none; stroke-width: 2; stroke-opacity: .5; stroke-dasharray: 3 9; animation: adb-flow 3s linear infinite; }
+.adb-pk { stroke: rgba(255, 255, 255, .65); stroke-width: 1.2; filter: drop-shadow(0 0 6px rgba(139, 92, 246, .7)); }
+:root[data-theme="light"] .adb-band { opacity: .07; }
+:root[data-theme="light"] .adb-label { opacity: .75; }
+:root[data-theme="light"] .adb-lane { stroke-opacity: .45; }
+@keyframes adb-flow { to { stroke-dashoffset: -24; } }
+@media (prefers-reduced-motion: reduce) { .adb-lane { animation: none; } }
