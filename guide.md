@@ -191,8 +191,15 @@ Registering a version does not deploy it: live payments keep using the base mode
 ## Monitoring
 
 Admin console navigation:
-- **Overview**: the stage map (below), KPIs, live transactions and a "needs
-  attention" list (stuck payments, Gold falling behind, failed runs).
+- **Overview**: a platform-health banner (MongoDB, fraud engine, Kafka,
+  Databricks, last pipeline run, latest model; click one to open its page) next
+  to a "needs attention" list, KPI tiles with 24 h sparklines, then three
+  sections: *Traffic & decisions* (payments per hour or per minute with a hover
+  tooltip and toggleable outcomes, plus a decision-mix donut and who decided),
+  *Data platform* (the stage map, recent pipeline runs, scoring speed), and
+  *Live activity & model* (newest payments with a risk bar, live over
+  Socket.IO; the latest trained model against its baseline and whether it is
+  actually serving).
 - **Transactions**: payments per minute for the last hour (by outcome), measured
   scoring speed (fraud-engine round trip and whole payment, median and p95), who
   made the decisions, and every payment with its processing time.
