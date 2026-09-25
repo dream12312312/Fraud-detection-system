@@ -88,11 +88,23 @@ elif dataset == "creditcard_benchmark":
     cache = f"{catalog}.{schema}.ref_creditcard"
     # Serverless compute on Free Edition has no internet egress, so the API stages the
     # OpenML parquet file into the landing volume (Model training → "Stage into lakehouse").
-    staged = f"/Volumes/{catalog}/landing/events/reference/creditcard/dataset_1597.pq"
+    # The API uploads the file as 4 MB parts + a manifest (a slow uplink cannot send 73 MB in one request).
+    staged_dir = f"/Volumes/{catalog}/landing/events/reference/creditcard"
+    staged = f"{staged_dir}/dataset_1597.manifest.json"
     if not spark.catalog.tableExists(cache):
         from pyspark.sql import functions as F
         try:
-            raw = spark.read.parquet(staged)
+            with open(staged) as fh:
+                manifest = json.load(fh)
+            local = "/tmp/openml_1597.pq"
+            with open(local, "wb") as out:
+                for part in manifest["parts"]:
+                    with open(f"{staged_dir}/{part}", "rb") as src:
+                        out.write(src.read())
+            import os
+            if os.path.getsize(local) != manifest["bytes"]:
+                raise Exception(f"staged parts add up to {os.path.getsize(local)} bytes, expected {manifest['bytes']}")
+            raw = spark.createDataFrame(pd.read_parquet(local))
             origin = staged
         except Exception as staged_err:
             try:

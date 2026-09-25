@@ -97,6 +97,18 @@ export async function putVolumeFile(path, content) {
   }
 }
 
+/** Size in bytes of a volume file, 0 when missing, null when Databricks could not be asked (HEAD only). */
+export async function volumeFileSize(path) {
+  if (!databricksConfigured()) return null;
+  try {
+    const res = await fetch(`${host()}/api/2.0/fs/files${path}`, { method: 'HEAD', headers: { Authorization: `Bearer ${token()}` } });
+    if (res.status === 404) return 0;
+    return res.ok ? Number(res.headers.get('content-length')) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** true / false when a volume file exists or not; null when Databricks could not be asked. HEAD only — never downloads. */
 export async function volumeFileExists(path) {
   if (!databricksConfigured()) return null;

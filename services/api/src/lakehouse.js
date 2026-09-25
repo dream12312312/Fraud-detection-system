@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Transaction, LakeBatch } from './models.js';
-import { putVolumeFile, databricksConfigured, volumeFileExists, dbProbe } from './databricksClient.js';
+import { putVolumeFile, databricksConfigured, volumeFileExists, volumeFileSize, dbProbe } from './databricksClient.js';
 import { VOLUME_PATH, CATALOG, SCHEMA } from './databricksProvision.js';
 
 /**
@@ -75,11 +75,16 @@ export async function landTransactions({ triggeredBy, limit = 5000 } = {}) {
 
 /* ---------- public benchmark dataset (staged by the API: serverless has no internet egress) ---------- */
 
+// The parquet file is uploaded as 4 MB parts plus a manifest (written last = staging complete):
+// one 73 MB PUT times out on a slow uplink, small parts can be retried and resumed.
 export const BENCHMARK = {
   source: 'https://data.openml.org/datasets/0000/1597/dataset_1597.pq',
-  path: `${VOLUME_PATH}/reference/creditcard/dataset_1597.pq`,
+  dir: `${VOLUME_PATH}/reference/creditcard`,
+  path: `${VOLUME_PATH}/reference/creditcard/dataset_1597.manifest.json`,
   table: `${CATALOG}.${SCHEMA}.ref_creditcard`
 };
+const PART_BYTES = 4 * 1024 * 1024;
+const UPLOAD_ATTEMPTS = 10;
 
 /** { staged, cached }: file in the landing volume / Delta cache table (null = could not check). */
 export async function benchmarkStatus() {
@@ -144,8 +149,27 @@ export function startStageBenchmark() {
       await fs.writeFile(local, body);
     }
     job.state = 'uploading';
-    const put = await putVolumeFile(BENCHMARK.path, body);
-    if (put.error) return fail(`Upload to ${BENCHMARK.path} failed: ${put.error}`);
+    job.uploaded = 0;
+    const parts = [];
+    for (let i = 0; i * PART_BYTES < body.length; i += 1) {
+      const name = `dataset_1597.pq.part-${String(i).padStart(3, '0')}`;
+      const chunk = body.subarray(i * PART_BYTES, (i + 1) * PART_BYTES);
+      parts.push(name);
+      // resume: a part already uploaded with the right size is skipped
+      if ((await volumeFileSize(`${BENCHMARK.dir}/${name}`)) !== chunk.length) {
+        let put;
+        // the uplink drops for minutes at a time, so wait it out before giving up
+        for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt += 1) {
+          put = await putVolumeFile(`${BENCHMARK.dir}/${name}`, chunk);
+          if (!put.error) break;
+          await pause(Math.min(10000 * attempt, 60000));
+        }
+        if (put.error) return fail(`Upload of ${name} failed after ${UPLOAD_ATTEMPTS} attempts: ${put.error}`);
+      }
+      job.uploaded += chunk.length;
+    }
+    const manifest = await putVolumeFile(BENCHMARK.path, JSON.stringify({ source: BENCHMARK.source, bytes: body.length, parts }));
+    if (manifest.error) return fail(`Upload of the manifest failed: ${manifest.error}`);
     job.state = 'done';
     job.finishedAt = new Date().toISOString();
   })().catch((err) => fail(err.message));

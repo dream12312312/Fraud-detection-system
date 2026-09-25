@@ -112,8 +112,13 @@ export default function TrainingPage({ flash, go }) {
                 <span>🌐</span>
                 <div style={{ flex: 1 }}>
                   {working ? (
-                    <><b>{job.state === 'downloading' ? 'Downloading from openml.org…' : 'Uploading into the landing volume…'}</b> {mb(job.bytes)}{job.total ? ` / ${mb(job.total)} MB (${Math.round((job.bytes / job.total) * 100)}%)` : ' MB'} · started {timeAgo(job.startedAt)}. openml.org can be slow; you can leave this page.
-                      {job.total > 0 && <div className="progress" style={{ marginTop: 6 }}><i style={{ width: `${(job.bytes / job.total) * 100}%` }} /></div>}</>
+                    <>{(() => {
+                      const done = job.state === 'uploading' ? job.uploaded || 0 : job.bytes;
+                      return (<>
+                        <b>{job.state === 'downloading' ? 'Step 1 of 2 · downloading from openml.org…' : 'Step 2 of 2 · uploading into the landing volume…'}</b> {mb(done)}{job.total ? ` / ${mb(job.total)} MB (${Math.round((done / job.total) * 100)}%)` : ' MB'} · started {timeAgo(job.startedAt)}. This can take a while on a slow connection; you can leave this page.
+                        {job.total > 0 && <div className="progress" style={{ marginTop: 6 }}><i style={{ width: `${(done / job.total) * 100}%` }} /></div>}
+                      </>);
+                    })()}</>
                   ) : job?.state === 'error' ? (
                     <><b>Staging failed.</b> {job.error}</>
                   ) : (
