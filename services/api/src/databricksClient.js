@@ -96,6 +96,18 @@ export async function putVolumeFile(path, content) {
   }
 }
 
+/** true / false when a volume file exists or not; null when Databricks could not be asked. HEAD only — never downloads. */
+export async function volumeFileExists(path) {
+  if (!databricksConfigured()) return null;
+  try {
+    const res = await fetch(`${host()}/api/2.0/fs/files${path}`, { method: 'HEAD', headers: { Authorization: `Bearer ${token()}` } });
+    if (res.status === 404) return false;
+    return res.ok ? true : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Output of one finished task run (dbutils.notebook.exit value). */
 export async function getRunOutput(taskRunId) {
   return dbGet(`/api/2.1/jobs/runs/get-output?run_id=${taskRunId}`);
@@ -162,13 +174,18 @@ export async function runSql(sql) {
  */
 // The admin UI polls every 5 s; without caching, COUNT(*) queries would keep the
 // SQL warehouse awake (and billing) for as long as a monitoring tab is open.
+// A result marked partial (a Databricks call timed out) is only kept briefly, so one slow
+// API answer never pins a wrong "not deployed / no rows" state for the full TTL.
+const PARTIAL_TTL_MS = 10 * 1000;
+const markPartial = (obj) => Object.defineProperty(obj, 'partial', { value: true, enumerable: false });
+
 function cached(ttlMs, fn) {
   let value;
   let expires = 0;
   let inflight = null;
   const get = async () => {
     if (Date.now() < expires) return value;
-    inflight = inflight || fn().then((v) => { value = v; expires = Date.now() + ttlMs; return v; }).finally(() => { inflight = null; });
+    inflight = inflight || fn().then((v) => { value = v; expires = Date.now() + (v?.partial ? PARTIAL_TTL_MS : ttlMs); return v; }).finally(() => { inflight = null; });
     return inflight;
   };
   get.clear = () => { expires = 0; };
@@ -184,16 +201,24 @@ async function medallionCountsUncached() {
   // UNION query — a missing table would otherwise fail the whole statement.
   const out = Object.fromEntries(MEDALLION_TABLES.map((t) => [t, null]));
   const present = [];
+  let partial = false;
   for (const t of MEDALLION_TABLES) {
     const info = await dbProbe(`/api/2.1/unity-catalog/tables/${CATALOG}.${SCHEMA}.${t}`);
     if (info && !info.notFound && !info.error) present.push(t);
+    // Unknown (API error/timeout) is not "missing": keep the last known count.
+    else if (!info || info.error) { partial = true; out[t] = lastCounts[t] ?? null; }
   }
-  if (!present.length) return out;
-  const sql = present.map((t) => `SELECT '${t}' AS t, COUNT(*) AS n FROM \`${CATALOG}\`.\`${SCHEMA}\`.\`${t}\``).join(' UNION ALL ');
-  const res = await runSql(sql);
-  for (const r of res?.rows ?? []) out[r.t] = r.n == null ? null : Number(r.n);
+  if (present.length) {
+    const sql = present.map((t) => `SELECT '${t}' AS t, COUNT(*) AS n FROM \`${CATALOG}\`.\`${SCHEMA}\`.\`${t}\``).join(' UNION ALL ');
+    const res = await runSql(sql);
+    if (!res?.rows) { partial = true; present.forEach((t) => { out[t] = lastCounts[t] ?? null; }); }
+    for (const r of res?.rows ?? []) out[r.t] = r.n == null ? null : Number(r.n);
+  }
+  if (partial) return markPartial(out);
+  lastCounts = { ...out };
   return out;
 }
+let lastCounts = {};
 
 /** List MLflow experiments in the workspace. */
 export async function listMlflowExperiments() {
@@ -263,9 +288,16 @@ async function databricksSnapshotUncached() {
   if (!configured) return snapshot;
 
   const jobs = await listJobs();
-  const ours = (jobs || []).filter((j) => (j.settings?.name || '').toLowerCase().includes('sentinelpay'));
+  // Jobs API did not answer: serve the last good snapshot (flagged stale) instead of "no jobs".
+  if (jobs == null) return markPartial(lastGoodSnapshot ? { ...lastGoodSnapshot, stale: true } : snapshot);
+  const ours = jobs.filter((j) => (j.settings?.name || '').toLowerCase().includes('sentinelpay'));
+  let partial = false;
   snapshot.jobs = await Promise.all(ours.slice(0, 10).map(async (j) => {
-    const runs = await listJobRuns(j.job_id, 3);
+    const fresh = await listJobRuns(j.job_id, 3);
+    if (fresh == null) partial = true;
+    const prev = lastGoodSnapshot?.jobs?.find((x) => x.jobId === j.job_id);
+    if (fresh == null && prev) return { ...prev, stale: true };
+    const runs = fresh;
     const latest = runs?.[0] ?? null;
     return {
       jobId: j.job_id,
@@ -290,5 +322,8 @@ async function databricksSnapshotUncached() {
   const finished = snapshot.jobs.map((j) => j.latestRun?.endTime).filter(Boolean).sort().pop() || null;
   if (finished !== lastFinishedRun) { if (seenFirstSnapshot) medallionCounts.clear(); lastFinishedRun = finished; }
   seenFirstSnapshot = true;
+  if (partial) return markPartial(snapshot);
+  lastGoodSnapshot = snapshot;
   return snapshot;
 }
+let lastGoodSnapshot = null;

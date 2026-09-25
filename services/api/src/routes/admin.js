@@ -10,7 +10,7 @@ import {
   runJob, getRun, getRunOutput, listModelVersions, taskState, latestAttempts, invalidateDatabricksCache, REGISTERED_MODEL
 } from '../databricksClient.js';
 import { provisionWorkspace, workspaceStatus, JOBS } from '../databricksProvision.js';
-import { landingBacklog, landTransactions } from '../lakehouse.js';
+import { landingBacklog, landTransactions, benchmarkStatus, startStageBenchmark, benchmarkStageJob } from '../lakehouse.js';
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -435,7 +435,7 @@ export const TRAINING_MODELS = [
 ];
 
 async function trainingDatasets() {
-  const mc = await medallionCounts();
+  const [mc, bench] = await Promise.all([medallionCounts(), benchmarkStatus()]);
   const silver = mc.silver_events;
   return [
     { id: 'synthetic_payments', label: 'Synthetic payments', rows: 50000, engineCompatible: true, available: true,
@@ -445,10 +445,27 @@ async function trainingDatasets() {
       note: silver == null
         ? 'Needs fraud.analytics.silver_events: land transactions, then run the pipeline.'
         : `${silver} rows in silver_events. Labels = blocked or user-reported fraud. Needs ≥ 50 rows and both classes.` },
-    { id: 'creditcard_benchmark', label: 'Credit-card benchmark (public)', rows: null, engineCompatible: false, available: true,
-      note: 'OpenML 1597 (anonymised PCA features). Downloaded once, cached as a Delta table. For comparison only — its features do not exist in live payments.' }
+    (() => {
+      const ready = bench.cached || bench.staged;
+      return { id: 'creditcard_benchmark', label: 'Credit-card benchmark (public)', rows: null, engineCompatible: false, available: Boolean(ready),
+        stageable: true, staged: bench.staged, cached: bench.cached, stageJob: benchmarkStageJob(),
+        note: ready
+          ? `OpenML 1597 (anonymised PCA features), ${bench.cached ? 'cached as a Delta table' : 'staged in the landing volume'}. For comparison only — its features do not exist in live payments.`
+          : bench.staged == null ? 'Could not check the landing volume (Databricks did not answer).'
+          : 'OpenML 1597. Databricks serverless has no internet access here, so stage it first: the API downloads it (~73 MB) into the landing volume.' };
+    })()
   ];
 }
+
+/** Start staging the public benchmark into the UC volume in the background (manual, needs confirm:true). */
+router.post('/training/datasets/creditcard_benchmark/stage', async (req, res) => {
+  try {
+    if (!requireConfirm(req, res)) return;
+    const job = startStageBenchmark();
+    if (job.error && !job.state) return res.status(400).json(job);
+    res.status(202).json(job);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 router.get('/training/options', async (_req, res) => {
   res.json({ models: TRAINING_MODELS, datasets: await trainingDatasets(), stages: JOBS.training.tasks.map(([k]) => k) });

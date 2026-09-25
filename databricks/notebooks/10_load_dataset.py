@@ -86,12 +86,27 @@ elif dataset == "platform_transactions":
                         "(need >= 50 rows and >= 5 of each class; generate traffic, land it and rerun the pipeline)")
 elif dataset == "creditcard_benchmark":
     cache = f"{catalog}.{schema}.ref_creditcard"
+    # Serverless compute on Free Edition has no internet egress, so the API stages the
+    # OpenML parquet file into the landing volume (Model training → "Stage into lakehouse").
+    staged = f"/Volumes/{catalog}/landing/events/reference/creditcard/dataset_1597.pq"
     if not spark.catalog.tableExists(cache):
-        from sklearn.datasets import fetch_openml
-        cc = fetch_openml(data_id=1597, as_frame=True, parser="auto").frame
-        cc["Class"] = cc["Class"].astype(int)
-        spark.createDataFrame(cc).write.mode("overwrite").saveAsTable(cache)
-        print(f"downloaded once and cached -> {cache}")
+        from pyspark.sql import functions as F
+        try:
+            raw = spark.read.parquet(staged)
+            origin = staged
+        except Exception as staged_err:
+            try:
+                from sklearn.datasets import fetch_openml
+                raw = spark.createDataFrame(fetch_openml(data_id=1597, as_frame=True, parser="auto").frame)
+                origin = "openml.org (direct download)"
+            except Exception as net_err:
+                raise Exception(
+                    "creditcard_benchmark is not staged and this compute cannot reach openml.org "
+                    f"({type(net_err).__name__}). In the admin console open Model training and press "
+                    f"'Stage into lakehouse' for the credit-card benchmark, then start the run again. "
+                    f"[expected file: {staged}]") from staged_err
+        raw.withColumn("Class", F.col("Class").cast("int")).write.mode("overwrite").saveAsTable(cache)
+        print(f"cached {origin} -> {cache}")
     full = spark.table(cache).withColumnRenamed("Class", "label")
     # Small, reproducible sample: every fraud row + a seeded sample of normal rows.
     fraud = full.filter("label = 1")

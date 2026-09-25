@@ -48,6 +48,7 @@ export default function TrainingPage({ flash, go }) {
   const [model, setModel] = useState('logistic_regression');
   const [dataset, setDataset] = useState('synthetic_payments');
   const [confirm, setConfirm] = useState(false);
+  const [stageAsk, setStageAsk] = useState(false);
   const [selected, setSelected] = useState(null);
   const [viewRun, setViewRun] = useState(null);
   const webgl = useMemo(hasWebGL, []);
@@ -63,6 +64,8 @@ export default function TrainingPage({ flash, go }) {
   const graph = useMemo(() => buildTrainingGraph({ run: shown, options, mlflow, system, host }), [shown, options, mlflow, system, host]);
   const completed = runs.filter((r) => r.status === 'COMPLETED' && r.metrics?.f1 != null);
 
+  const stage = () => run('stage', () => api('/admin/training/datasets/creditcard_benchmark/stage', { method: 'POST', body: { confirm: true } }),
+    'Staging started — the download runs in the background on the API server.').then((r) => { setStageAsk(false); if (r) reload(); });
   const start = () => run('start', () => api('/admin/training/start', { method: 'POST', body: { confirm: true, model, dataset } }), 'Training started on Databricks.')
     .then((r) => { setConfirm(false); setViewRun(null); if (r) reload(); });
 
@@ -100,6 +103,27 @@ export default function TrainingPage({ flash, go }) {
               </button>
             ))}
           </div>
+          {ds?.stageable && ds.staged === false && !ds.cached && (() => {
+            const job = ds.stageJob;
+            const working = job && ['downloading', 'uploading'].includes(job.state);
+            const mb = (b) => (b / 1048576).toFixed(1);
+            return (
+              <div className={`flash ${job?.state === 'error' ? 'error' : 'info'}`} style={{ marginTop: 12 }}>
+                <span>🌐</span>
+                <div style={{ flex: 1 }}>
+                  {working ? (
+                    <><b>{job.state === 'downloading' ? 'Downloading from openml.org…' : 'Uploading into the landing volume…'}</b> {mb(job.bytes)}{job.total ? ` / ${mb(job.total)} MB (${Math.round((job.bytes / job.total) * 100)}%)` : ' MB'} · started {timeAgo(job.startedAt)}. openml.org can be slow; you can leave this page.
+                      {job.total > 0 && <div className="progress" style={{ marginTop: 6 }}><i style={{ width: `${(job.bytes / job.total) * 100}%` }} /></div>}</>
+                  ) : job?.state === 'error' ? (
+                    <><b>Staging failed.</b> {job.error}</>
+                  ) : (
+                    <><b>Stage the benchmark first.</b> Databricks serverless compute in this workspace cannot reach the internet, so the API server downloads the file (~73 MB from openml.org) and uploads it into <span className="mono">/Volumes/fraud/landing/events/reference</span>.</>
+                  )}
+                </div>
+                {!working && <button className="btn sm" disabled={!!busy} onClick={() => setStageAsk(true)}>{job?.state === 'error' ? 'Try again' : 'Stage into lakehouse'}</button>}
+              </div>
+            );
+          })()}
           <div className="row between" style={{ marginTop: 16, flexWrap: 'wrap', gap: 10 }}>
             <div className="faint" style={{ fontSize: 12.5 }}>
               {!job ? 'Training job not deployed — set up Databricks first.' : active ? `A run is ${cur.status.toLowerCase()}; one run at a time.` : 'Runs 4 tasks on Databricks serverless compute (~5–8 min).'}
@@ -232,6 +256,11 @@ export default function TrainingPage({ flash, go }) {
         </div>
       </div>
 
+      {stageAsk && (
+        <Confirm title="Stage the credit-card benchmark?" confirmLabel="Download and upload" busy={busy === 'stage'} onCancel={() => setStageAsk(false)} onConfirm={stage}>
+          The API server downloads OpenML dataset 1597 (~73 MB parquet) and writes it into your Unity Catalog landing volume. No compute runs. openml.org is often slow (it can take 10–40 minutes); the download continues in the background and the progress shows on this page.
+        </Confirm>
+      )}
       {confirm && (
         <Confirm title="Start a training run?" confirmLabel="Start on Databricks" busy={busy === 'start'} onCancel={() => setConfirm(false)} onConfirm={start}>
           <b>{options?.models?.find((m) => m.id === model)?.label}</b> on <b>{ds?.label}</b>. Runs job <span className="mono">sentinelpay-model-training</span> on your Databricks serverless compute (uses workspace compute; Free Edition queues it if another job is running).
