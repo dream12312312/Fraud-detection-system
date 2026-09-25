@@ -14,7 +14,7 @@ const newTxId = () => `TX${randomUUID().split('-')[0].toUpperCase()}${Date.now()
 function emitTx(req, tx, userId) {
   const io = req.app.get('io');
   if (!io) return;
-  const summary = { txId: tx.txId, amount: tx.amount, status: tx.status, fraudProbability: tx.fraudProbability, riskLevel: tx.riskLevel, decision: tx.decision, reasons: tx.reasons };
+  const summary = { txId: tx.txId, amount: tx.amount, status: tx.status, fraudProbability: tx.fraudProbability, riskLevel: tx.riskLevel, decision: tx.decision, reasons: tx.reasons, decisionSource: tx.decisionSource, timings: tx.timings };
   io.to(`user:${userId}`).emit('transaction:update', summary);
   io.to('admins').emit('admin:txn', { ...summary, userId: String(userId) });
 }
@@ -67,6 +67,7 @@ router.post('/beneficiaries', async (req, res) => {
 });
 
 router.post('/transfer', async (req, res) => {
+  const received = performance.now();
   try {
     const { toAccount, amount, merchant, country, device } = req.body ?? {};
     const amt = Number(amount);
@@ -113,6 +114,7 @@ router.post('/transfer', async (req, res) => {
       homeCountry: req.user.homeCountry || 'US'
     };
     tx.features = features;
+    const scoreStart = performance.now();
     let decision = await scoreTransaction({
       transaction_id: tx.txId,
       user_id: String(req.user._id),
@@ -127,6 +129,7 @@ router.post('/transfer', async (req, res) => {
       velocity_1h,
       avg_amount_30d: features.avgAmount30d
     });
+    const scoreMs = Math.round(performance.now() - scoreStart);
     if (!decision) {
       decision = fallbackRules({ amount: amt, dailyLimit: from.dailyLimit, isNewBeneficiary: !beneficiary, homeCountry: req.user.homeCountry, country: tx.country });
     }
@@ -154,6 +157,7 @@ router.post('/transfer', async (req, res) => {
       await from.save();
       await notify(req, req.user._id, 'Transaction completed', `${tx.txId}: $${amt.toFixed(2)} sent successfully.`, 'SUCCESS');
     }
+    tx.timings = { scoreMs, totalMs: Math.round(performance.now() - received) };
     await tx.save();
     emitTx(req, tx, req.user._id);
 

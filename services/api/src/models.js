@@ -63,6 +63,8 @@ const TransactionSchema = new Schema({
     hourOfDay: Number, velocity1h: Number, avgAmount30d: Number,
     isNewBeneficiary: Boolean, homeCountry: String
   },
+  // Measured on the hot path: fraud-engine round trip, and request received → decision saved.
+  timings: { scoreMs: Number, totalMs: Number },
   // Admin balance adjustments are ledger entries, never fraud-scored.
   adminNote: String,
   // Set when the transaction was exported to the Databricks landing volume.

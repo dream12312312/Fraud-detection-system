@@ -10,6 +10,7 @@ import {
   runJob, getRun, getRunOutput, listModelVersions, taskState, latestAttempts, invalidateDatabricksCache, REGISTERED_MODEL
 } from '../databricksClient.js';
 import { provisionWorkspace, workspaceStatus, JOBS } from '../databricksProvision.js';
+import { dataflowSnapshot } from '../dataflow.js';
 import { landingBacklog, landTransactions, benchmarkStatus, startStageBenchmark, benchmarkStageJob } from '../lakehouse.js';
 
 const router = Router();
@@ -369,6 +370,15 @@ router.get('/pipeline', async (_req, res) => {
   } catch (err) {
     console.error('[admin] pipeline monitoring failed:', err);
     res.status(500).json({ error: 'Could not load pipeline monitoring data' });
+  }
+});
+
+/** Data-flow monitor: rows per stage, backlogs, freshness, reconciliation, run timings, scoring latency. */
+router.get('/dataflow', async (_req, res) => {
+  try { res.json(await dataflowSnapshot()); }
+  catch (err) {
+    console.error('[admin] dataflow monitoring failed:', err);
+    res.status(500).json({ error: 'Could not load data-flow monitoring data' });
   }
 });
 
