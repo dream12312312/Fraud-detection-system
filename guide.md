@@ -160,15 +160,19 @@ Training never starts automatically. Admin console → **Model training**:
      payments, no download.
    - **Platform transactions**: your own `silver_events` (needs >= 50 labelled
      rows; labels = blocked or user-reported fraud, i.e. the base model's decisions).
-   - **Credit-card benchmark**: OpenML 1597, downloaded once and cached as the
-     Delta table `ref_creditcard`; benchmark only, since its PCA features do not
-     exist in live payments.
+   - **Credit-card benchmark**: OpenML 1597, cached as the Delta table
+     `ref_creditcard`; benchmark only, since its PCA features do not exist in live
+     payments. Free Edition serverless compute has **no internet access**, so press
+     **Stage into lakehouse** on this dataset first: the API server downloads the
+     parquet file (~70 MB, openml.org can be slow — progress is shown) into
+     `/Volumes/fraud/landing/events/reference/creditcard/`, and the notebook reads it
+     from there.
 3. **Start training** (confirm) runs job `sentinelpay-model-training`, four tasks:
    `10_load_dataset` → `11_build_features` (the fraud engine's 8 features, quality
    checks, seeded 75/25 split) → `12_train_model` (logs to MLflow) →
    `13_evaluate_register` (scores the test set with the new model and with the
    live base model, then registers a version of `fraud.analytics.fraud_classifier`).
-4. The page and the 3D view show each stage's real Databricks task state and
+4. The page and the 3D view show each task's real Databricks state and
    output (rows, features, metrics). Results, history and a base-model comparison
    are kept per run.
 
@@ -179,19 +183,33 @@ Registering a version does not deploy it: live payments keep using the base mode
 ## Monitoring
 
 Admin console navigation:
-- **Overview**: the flow MongoDB → landing → Bronze → Silver → Gold → model with
-  real counts, KPIs, live transactions and a "needs attention" list.
-- **Transactions / Users & money**: operations (see below).
-- **3D Architecture**: the whole system as three lanes (real-time serving,
-  ingestion & lakehouse, machine-learning loop) on a Databricks platform. Every
-  node shows live status; click one for details and links into Databricks. Use
-  **Walk through the pipeline** for a guided, step-by-step tour, or the 2D view
-  when WebGL is unavailable.
-- **Data pipeline / Model training / Databricks**: control pages described above.
-- **System health**: API, MongoDB, fraud engine, Kafka, Databricks, SQL warehouse.
+- **Overview**: the stage map (below), KPIs, live transactions and a "needs
+  attention" list (stuck payments, Gold falling behind, failed runs).
+- **Transactions**: payments per minute for the last hour (by outcome), measured
+  scoring speed (fraud-engine round trip and whole payment, median and p95), who
+  made the decisions, and every payment with its processing time.
+- **Live data flow (3D)**: the whole system as three lanes (real-time scoring,
+  ingestion & lakehouse, machine-learning loop) on a Databricks platform. Each new
+  payment pulses along its real path; orange block stacks on the floor are rows
+  waiting for the next stage (the label carries the exact number). Click a node for
+  details and links into Databricks; the 2D view is used when WebGL is unavailable.
+  The Kafka path only appears when `KAFKA_ENABLED=true`.
+- **Data pipeline**: the monitoring view of the lakehouse:
+  - *Where the data is now*: rows per stage, rows waiting between stages, and when
+    each layer was last built. "Gold is behind by N" counts settled payments that
+    are not in Gold yet.
+  - *Where the rows went*: a flow chart of the last successful run, built from the
+    notebooks' own exit values, with reconciliation checks (Bronze rows = Silver
+    input; Silver input = clean + quarantined + duplicates).
+  - *Run timeline*: each recent run split into waiting-for-compute and the
+    bronze / silver / gold tasks.
+- **Model training**: also shows where a run's time went and the confusion matrix
+  of the test set.
+- **Databricks / System health**: workspace set-up and service checks.
 
-Everything shown comes from real system data; unavailable integrations show an
-honest "not set up" state instead of fake numbers.
+Everything shown comes from real system data (MongoDB, the Databricks Jobs API,
+Unity Catalog, MLflow); the backend endpoint is `GET /api/v1/admin/dataflow`.
+Unavailable integrations show an honest "not set up" state instead of fake numbers.
 
 ## User management
 
@@ -235,6 +253,19 @@ Admin console → **Users & money** → click a user:
 6. Send a large foreign transfer (e.g. $4,000 to NG) — expect
    **"being reviewed for security reasons"** → confirm or report.
 7. Watch both windows: socket.io shows the transaction and alerts live on both sides.
+
+### Automated end-to-end test
+
+`npm run test:e2e` runs the whole pipeline against the running system (real users,
+payments, landing, the medallion job and 4 training runs — it uses Databricks compute).
+`E2E_PHASES=users,admin node scripts/e2e.mjs` runs only the user and developer checks.
+Results: `scripts/e2e-output/`. The latest results and the improvement strategy are
+in [REPORT.md](REPORT.md).
+
+### Themes
+
+Both apps start in the bright theme; the **🌙 Dark / ☀️ Light** button in the top bar
+switches it (remembered per browser).
 
 ## Troubleshooting
 
