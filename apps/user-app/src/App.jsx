@@ -357,24 +357,33 @@ function Shell({ user, onUser, onLogout }) {
   }, [user.id]);
 
   const reviewing = data.txns.find((t) => t.status === 'CHALLENGED');
+  // challenged payments the user already answered or put off with "Not now";
+  // the popup only opens by itself for new ones
+  const [dismissed, setDismissed] = useState(() => new Set());
+  const dismissAll = () => setDismissed((s) => new Set([...s, ...data.txns.filter((t) => t.status === 'CHALLENGED').map((t) => t.txId)]));
+  const closeReview = () => { dismissAll(); setReview(null); };
+  const openReview = () => { if (reviewing) setReview(reviewing); };
 
   const decide = async (kind) => {
-    if (!reviewing) return;
+    if (!review) return;
+    const { txId } = review;
+    dismissAll();
+    setReview(null);
     try {
-      await api(`/transactions/${reviewing.txId}/${kind}`, { method: 'POST' });
-      setReview(null);
-      flashMsg(kind === 'confirm' ? 'ok' : 'info', kind === 'confirm' ? `Payment ${reviewing.txId} confirmed and sent.` : `Transaction ${reviewing.txId} reported as fraud. Our team will contact you.`);
-      await load();
+      await api(`/transactions/${txId}/${kind}`, { method: 'POST' });
+      flashMsg(kind === 'confirm' ? 'ok' : 'info', kind === 'confirm' ? `Payment ${txId} confirmed and sent.` : `Transaction ${txId} reported as fraud. Our team will contact you.`);
     } catch (err) {
       flashMsg('error', err.message);
     }
+    await load();
   };
 
   const checking = data.accounts.find((a) => a.type === 'CHECKING');
   const savings = data.accounts.find((a) => a.type === 'SAVINGS');
   const unread = data.notifs.filter((n) => !n.read).length;
 
-  if (reviewing && !review) setReview(reviewing);
+  const fresh = data.txns.find((t) => t.status === 'CHALLENGED' && !dismissed.has(t.txId));
+  useEffect(() => { if (fresh && !review) setReview(fresh); }, [fresh, review]);
 
   return (
     <div className="app-shell">
@@ -394,7 +403,7 @@ function Shell({ user, onUser, onLogout }) {
           <Flash flash={flash} onClose={clearFlash} />
 
           {tab === 'overview' && (
-            <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} notifs={data.notifs} loading={loading} go={setTab} />
+            <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} notifs={data.notifs} loading={loading} go={setTab} onReview={openReview} />
           )}
           {tab === 'transfer' && <TransferTab data={data} flashMsg={flashMsg} reload={load} />}
           {tab === 'transactions' && <TxnTab txns={data.txns} loading={loading} />}
@@ -403,7 +412,7 @@ function Shell({ user, onUser, onLogout }) {
         </main>
       </div>
 
-      <ReviewModal review={review} busy={false} onDecision={decide} onClose={() => setReview(null)} />
+      <ReviewModal review={review} busy={false} onDecision={decide} onClose={closeReview} />
     </div>
   );
 }
@@ -423,7 +432,7 @@ function useFlashSafe() {
 
 /* ---------- overview ---------- */
 
-function OverviewTab({ user, checking, savings, txns, notifs, loading, go }) {
+function OverviewTab({ user, checking, savings, txns, notifs, loading, go, onReview }) {
   const unread = notifs.filter((n) => !n.read).length;
   const challenged = txns.find((t) => t.status === 'CHALLENGED');
   const blocked = txns.filter((t) => t.status === 'BLOCKED').length;
@@ -486,7 +495,7 @@ function OverviewTab({ user, checking, savings, txns, notifs, loading, go }) {
                 <b>Action needed</b>
                 Transaction {challenged.txId} ({money(challenged.amount)}) is waiting for your confirmation.
               </div>
-              <button className="btn sm success" onClick={() => go('transactions')}>Review</button>
+              <button className="btn sm success" onClick={onReview}>Review</button>
             </div>
           )}
 
