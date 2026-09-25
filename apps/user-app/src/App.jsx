@@ -137,42 +137,6 @@ function AuthScreen({ onAuth }) {
   );
 }
 
-/* ---------- review (step-up) modal ---------- */
-
-function ReviewModal({ review, onDecision, onClose, busy }) {
-  if (!review) return null;
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Confirm this payment</h3>
-        <p style={{ color: 'var(--text-dim)', fontSize: 13.5, margin: '4px 0 14px' }}>
-          Our fraud engine flagged this transaction for verification. Please review the details.
-        </p>
-        <div className="review-row"><span className="k">Transaction</span><b>{review.txId}</b></div>
-        <div className="review-row"><span className="k">To</span><b>{review.merchant || 'Transfer'}</b></div>
-        <div className="review-row"><span className="k">Amount</span><b>{money(review.amount)}</b></div>
-        <div className="review-row">
-          <span className="k">Risk</span>
-          <RiskBadge level={review.riskLevel} prob={review.fraudProbability} />
-        </div>
-        {review.reasons?.length > 0 && (
-          <div style={{ marginTop: 12 }}>
-            <div className="section-label" style={{ margin: '0 0 8px' }}>Why we flagged it</div>
-            {review.reasons.map((r) => (
-              <div key={r} style={{ fontSize: 13, color: 'var(--text-dim)', padding: '4px 0' }}>• {r.replaceAll('_', ' ').toLowerCase()}</div>
-            ))}
-          </div>
-        )}
-        <div className="actions">
-          <button className="btn ghost" disabled={busy} onClick={onClose}>Not now</button>
-          <button className="btn danger" disabled={busy} onClick={() => onDecision('report')}>Report fraud</button>
-          <button className="btn success" disabled={busy} onClick={() => onDecision('confirm')}>Confirm payment</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ---------- dashboard ---------- */
 
 const NAV = [
@@ -320,7 +284,7 @@ function ChangePasswordScreen({ user, onDone, onLogout }) {
 function Shell({ user, onUser, onLogout }) {
   const [tab, setTab] = useState('overview');
   const [flash, flashMsg, clearFlash] = useFlashSafe();
-  const [review, setReview] = useState(null);
+  const [focus, setFocus] = useState(null);
   const [data, setData] = useState({ accounts: [], txns: [], notifs: [], beneficiaries: [] });
   const [loading, setLoading] = useState(true);
   const socketRef = useRef(null);
@@ -358,22 +322,18 @@ function Shell({ user, onUser, onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id]);
 
+  const goTab = (t) => { setFocus(null); setTab(t); };
   const reviewing = data.txns.find((t) => t.status === 'CHALLENGED');
-  // challenged payments the user already answered or put off with "Not now";
-  // the popup only opens by itself for new ones
-  const [dismissed, setDismissed] = useState(() => new Set());
-  const dismissAll = () => setDismissed((s) => new Set([...s, ...data.txns.filter((t) => t.status === 'CHALLENGED').map((t) => t.txId)]));
-  const closeReview = () => { dismissAll(); setReview(null); };
-  const openReview = (tx) => { const t = tx?.txId ? tx : reviewing; if (t) setReview(t); };
+  // "Review" opens the payment itself in Transactions, where its verdict carries the answer buttons
+  const openReview = (tx) => { const t = tx?.txId ? tx : reviewing; if (t) { setFocus(t._id); setTab('transactions'); } };
 
-  const decide = async (kind) => {
-    if (!review) return;
-    const { txId } = review;
-    dismissAll();
-    setReview(null);
+  // the customer's answer to a payment the fraud engine sent for confirmation
+  const decide = async (tx, kind) => {
     try {
-      await api(`/transactions/${txId}/${kind}`, { method: 'POST' });
-      flashMsg(kind === 'confirm' ? 'ok' : 'info', kind === 'confirm' ? `Payment ${txId} confirmed and sent.` : `Transaction ${txId} reported as fraud. Our team will contact you.`);
+      const r = await api(`/transactions/${tx.txId}/${kind}`, { method: 'POST' });
+      if (kind === 'report') flashMsg('info', `Payment ${tx.txId} reported as fraud and stopped. No money left your account.`);
+      else if (r.status === 'COMPLETED') flashMsg('ok', `Payment ${tx.txId} confirmed and sent.`);
+      else flashMsg('warn', `Payment ${tx.txId} could not be sent (${r.status.toLowerCase()}).`);
     } catch (err) {
       flashMsg('error', err.message);
     }
@@ -384,8 +344,6 @@ function Shell({ user, onUser, onLogout }) {
   const savings = data.accounts.find((a) => a.type === 'SAVINGS');
   const unread = data.notifs.filter((n) => !n.read).length;
 
-  const fresh = data.txns.find((t) => t.status === 'CHALLENGED' && !dismissed.has(t.txId));
-  useEffect(() => { if (fresh && !review) setReview(fresh); }, [fresh, review]);
 
   return (
     <div className="app-shell">
@@ -400,21 +358,19 @@ function Shell({ user, onUser, onLogout }) {
       </header>
 
       <div className="layout">
-        <SideNav user={user} tab={tab} setTab={setTab} unread={unread} challenged={Boolean(reviewing)} onLogout={onLogout} />
+        <SideNav user={user} tab={tab} setTab={goTab}unread={unread} challenged={Boolean(reviewing)} onLogout={onLogout} />
         <main className="main">
           <Flash flash={flash} onClose={clearFlash} />
 
           {tab === 'overview' && (
-            <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} beneficiaries={data.beneficiaries} notifs={data.notifs} loading={loading} go={setTab} onReview={openReview} />
+            <OverviewTab user={user} checking={checking} savings={savings} txns={data.txns} beneficiaries={data.beneficiaries} notifs={data.notifs} loading={loading} go={goTab} onReview={openReview} />
           )}
-          {tab === 'transfer' && <TransferTab data={data} flashMsg={flashMsg} reload={load} />}
-          {tab === 'transactions' && <TxnTab txns={data.txns} loading={loading} onReview={openReview} />}
+          {tab === 'transfer' && <TransferTab data={data} flashMsg={flashMsg} reload={load} onDecide={decide} />}
+          {tab === 'transactions' && <TxnTab txns={data.txns} loading={loading} onDecide={decide} focus={focus} />}
           {tab === 'beneficiaries' && <BeneficiaryTab data={data} flashMsg={flashMsg} reload={load} />}
           {tab === 'notifications' && <NotifTab notifs={data.notifs} reload={load} now={now} />}
         </main>
       </div>
-
-      <ReviewModal review={review} busy={false} onDecision={decide} onClose={closeReview} />
     </div>
   );
 }
@@ -487,6 +443,7 @@ function ProtectCollapse({ go, isNew }) {
 function OverviewTab({ user, checking, savings, txns, beneficiaries, notifs, loading, go, onReview }) {
   const unread = notifs.filter((n) => !n.read).length;
   const challenged = txns.find((t) => t.status === 'CHALLENGED');
+  const nChallenged = txns.filter((t) => t.status === 'CHALLENGED').length;
   const blocked = txns.filter((t) => t.status === 'BLOCKED').length;
   const avail = checking ? checking.balance - checking.heldAmount : 0;
   const heldPct = checking?.balance ? Math.min((checking.heldAmount / checking.balance) * 100, 100) : 0;
@@ -530,9 +487,11 @@ function OverviewTab({ user, checking, savings, txns, beneficiaries, notifs, loa
               <span>⚠️</span>
               <div style={{ flex: 1 }}>
                 <b>Action needed</b>
-                Transaction {challenged.txId} ({money(challenged.amount)}) is waiting for your confirmation.
+                {nChallenged > 1
+                  ? `${nChallenged} payments are on hold until you confirm or report them.`
+                  : `Payment ${challenged.txId} (${money(challenged.amount)}) is on hold until you confirm or report it.`}
               </div>
-              <button className="btn sm success" onClick={onReview}>Review</button>
+              <button className="btn sm success" onClick={() => onReview(challenged)}>Review</button>
             </div>
           )}
 
@@ -608,7 +567,7 @@ function OverviewTab({ user, checking, savings, txns, beneficiaries, notifs, loa
 
 const COUNTRIES = ['US', 'GB', 'DE', 'FR', 'NG', 'IN', 'BR', 'CA'];
 
-function TransferTab({ data, flashMsg, reload }) {
+function TransferTab({ data, flashMsg, reload, onDecide }) {
   const [form, setForm] = useState({ toAccount: '', amount: '', merchant: '', country: 'US' });
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState(null);
@@ -630,7 +589,7 @@ function TransferTab({ data, flashMsg, reload }) {
       const res = await api('/transfer', { method: 'POST', body: { ...form, amount: Number(form.amount) } });
       setLast({ ...res, decisionSource: res.source, country: form.country, createdAt: res.createdAt || new Date().toISOString() });
       if (res.status === 'CHALLENGED') {
-        flashMsg('warn', 'Your payment is being reviewed for security reasons. Please confirm it below to continue.');
+        flashMsg('warn', 'This payment looked unusual, so it is on hold. Confirm or report it in "What happened to your payment".');
       } else if (res.status === 'BLOCKED') {
         flashMsg('fraud', 'This transaction was blocked because suspicious activity was detected.', 10000);
       } else if (res.status === 'COMPLETED') {
@@ -646,6 +605,10 @@ function TransferTab({ data, flashMsg, reload }) {
       setBusy(false);
     }
   };
+
+  // the stored record keeps the panel current after the payment is answered or settled elsewhere
+  const live = last && data.txns.find((t) => t.txId === last.txId);
+  const shown = live ? { ...last, ...live } : last;
 
   return (
     <div className="grid sidebar">
@@ -705,10 +668,10 @@ function TransferTab({ data, flashMsg, reload }) {
           : (
             <>
               <div className="row between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-                <span className="mono">{last.txId}</span>
-                <span className="row" style={{ gap: 6 }}><span className={`badge ${last.status}`}>{last.status}</span><RiskBadge level={last.riskLevel} prob={last.fraudProbability} /></span>
+                <span className="mono">{shown.txId}</span>
+                <span className="row" style={{ gap: 6 }}><span className={`badge ${shown.status}`}>{shown.status}</span><RiskBadge level={shown.riskLevel} prob={shown.fraudProbability} /></span>
               </div>
-              <PaymentJourney tx={last} />
+              <PaymentJourney tx={shown} onDecide={onDecide} />
             </>
           )}
       </div>
@@ -720,8 +683,11 @@ function TransferTab({ data, flashMsg, reload }) {
 
 const TX_FILTERS = [['all', 'All'], ['COMPLETED', 'Completed'], ['CHALLENGED', 'Needs you'], ['BLOCKED', 'Blocked']];
 
-function TxnTab({ txns, loading, onReview }) {
-  const [open, setOpen] = useState(null);
+function TxnTab({ txns, loading, onDecide, focus }) {
+  const [open, setOpen] = useState(focus);
+  useEffect(() => {
+    if (focus && !loading) setTimeout(() => document.getElementById(`tx-${focus}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  }, [focus, loading]);
   const [filter, setFilter] = useState('all');
   if (loading) return <div className="card"><p style={{ color: 'var(--text-dim)' }}>Loading…</p></div>;
   const shown = txns.filter((t) => filter === 'all' || t.status === filter);
@@ -770,14 +736,14 @@ function TxnTab({ txns, loading, onReview }) {
                     <td><span className={`badge ${t.status}`}>{t.status}</span></td>
                     <td><RiskBadge level={t.riskLevel} prob={t.fraudProbability} /></td>
                     <td className="faint" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {t.status === 'CHALLENGED' && (
-                        <button className="btn sm success" style={{ marginRight: 8 }} onClick={(e) => { e.stopPropagation(); onReview(t); }}>Confirm or report</button>
+                      {t.status === 'CHALLENGED' && open !== t._id && (
+                        <button className="btn sm success" style={{ marginRight: 8 }} onClick={(e) => { e.stopPropagation(); setOpen(t._id); }}>Confirm or report</button>
                       )}
                       {open === t._id ? '▲' : '▼'}
                     </td>
                   </tr>
                   {open === t._id && (
-                    <tr className="journey-row"><td colSpan={6}><PaymentJourney tx={t} /></td></tr>
+                    <tr className="journey-row"><td colSpan={6}><PaymentJourney tx={t} onDecide={onDecide} /></td></tr>
                   )}
                 </React.Fragment>
               ))}

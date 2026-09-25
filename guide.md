@@ -83,8 +83,10 @@ transactions, 7-day spending chart and your latest alerts.
 ## 8. Fraud alerts
 
 Alerts appear as pop-ups, in **Alerts**, and on the Overview page.
-When a payment is challenged you get a confirmation dialog: **Confirm payment**
-(completes it) or **Report fraud** (blocks it and notifies the bank).
+When a payment is challenged it stays on hold and its verdict ("This payment looked
+unusual…") shows two buttons: **Yes, send it** (completes it) or **No, report fraud**
+(blocks it and notifies the bank). You find it on the Send money result panel, via
+**Review** on the Overview banner, or on the payment's row in **Transactions**.
 
 ## 9. Temporary passwords
 

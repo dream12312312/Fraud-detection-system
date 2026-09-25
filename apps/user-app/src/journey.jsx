@@ -24,7 +24,7 @@ const reasonList = (r) => (r || []).filter((x) => !SETTLED.includes(x));
  * What happened to one payment, step by step, using only fields stored on the
  * transaction (features, decision source, status, timings, lakehouse landing time).
  */
-export function PaymentJourney({ tx }) {
+export function PaymentJourney({ tx, onDecide }) {
   const f = tx.features || {};
   if (tx.decisionSource === 'ADMIN') {
     return (
@@ -95,7 +95,7 @@ export function PaymentJourney({ tx }) {
 
   return (
     <>
-      <Verdict tx={tx} totalMs={totalMs} decisionIco={decisionIco} decided={decided} outcome={outcome} />
+      <Verdict tx={tx} totalMs={totalMs} decisionIco={decisionIco} decided={decided} outcome={outcome} onDecide={onDecide} />
       <PaymentPath steps={steps} icons={['📱', '📏', '🧠', decisionIco, '🌊']} labels={['You', 'Signals', 'Fraud check', 'Decision', 'Data lake']} />
       <ol className="journey">
         {steps.map((s) => <li key={s.t} className={s.cls}><div className="j-t">{s.t}</div>{s.body}</li>)}
@@ -105,8 +105,15 @@ export function PaymentJourney({ tx }) {
 }
 
 /** One-sentence, plain-language summary of the whole payment, up top. */
-function Verdict({ tx, totalMs, decisionIco, decided, outcome }) {
-  const sentence = {
+function Verdict({ tx, totalMs, decisionIco, decided, outcome, onDecide }) {
+  const [busy, setBusy] = React.useState(false);
+  const act = async (kind) => { setBusy(true); try { await onDecide(tx, kind); } finally { setBusy(false); } };
+  const r = tx.reasons || [];
+  const settled = r.includes('USER_REPORTED_FRAUD') ? 'You reported this payment as fraud, so we stopped it before any money moved.'
+    : r.includes('ADMIN_BLOCKED') ? 'Our fraud team stopped this payment before any money moved.'
+      : r.includes('ADMIN_APPROVED') ? 'This payment looked unusual; our fraud team checked it and sent it.'
+        : tx.decision === 'REVIEW' && tx.status === 'COMPLETED' ? 'This payment looked unusual; you confirmed it, so it went through.' : null;
+  const sentence = settled || {
     COMPLETED: 'This payment looked normal and went through.',
     CHALLENGED: 'This payment looked unusual — we need you to confirm it is really you.',
     BLOCKED: 'This payment looked like fraud, so we stopped it before any money moved.',
@@ -119,6 +126,15 @@ function Verdict({ tx, totalMs, decisionIco, decided, outcome }) {
       <div className="v-body">
         <div className="v-sentence">{sentence}</div>
         <div className="v-meta">{money(tx.amount)} · {tx.txId}{totalMs != null && <span className="j-time"> · handled in {totalMs} ms</span>}</div>
+        {tx.status === 'CHALLENGED' && onDecide && (
+          <div className="v-actions">
+            <span>Did you make this payment? The money stays on hold until you answer.</span>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn sm success" disabled={busy} onClick={() => act('confirm')}>Yes, send it</button>
+              <button className="btn sm danger" disabled={busy} onClick={() => act('report')}>No, report fraud</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
