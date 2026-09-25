@@ -1,13 +1,12 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, RoundedBox } from '@react-three/drei';
+import { OrbitControls, RoundedBox, Environment, Lightformer } from '@react-three/drei';
 import * as THREE from 'three';
 import { STATUS, LAYERS, LANES, PLATFORM } from './graph.js';
+import { NodeModel, modelKind, modelTop, useModelMaterials, shadowTexture } from './models.jsx';
 
 const FLOW_COLOR = { hot: '#5b8cff', cold: '#ff8a3d', train: '#f5c542' };
 const DECISION_COLOR = { COMPLETED: '#34d399', CHALLENGED: '#fbbf24', BLOCKED: '#f87171', FAILED: '#94a3b8' };
-const BODY_Y = 1.15; // nodes float above their pedestal
-const SPINNING = new Set(['brain', 'gear', 'orb', 'crystal']);
 
 /* ---------- shared textures / materials ---------- */
 
@@ -35,46 +34,31 @@ function Glow({ color, scale = 2.4, opacity = 0.5, position = [0, 0, 0] }) {
   );
 }
 
-/* ---------- node bodies ---------- */
+/* ---------- nodes: pedestal + realistic model ---------- */
 
-function Geometry({ shape }) {
-  switch (shape) {
-    case 'database': return <cylinderGeometry args={[0.7, 0.7, 1.2, 40]} />;
-    case 'brain': return <icosahedronGeometry args={[0.78, 1]} />;
-    case 'bell': return <coneGeometry args={[0.62, 1.0, 32]} />;
-    case 'ring': return <torusGeometry args={[0.62, 0.2, 18, 56]} />;
-    case 'funnel': return <coneGeometry args={[0.62, 1.05, 32]} />;
-    case 'disc': return <cylinderGeometry args={[0.85, 0.85, 0.34, 48]} />;
-    case 'gear': return <dodecahedronGeometry args={[0.66]} />;
-    case 'orb': return <sphereGeometry args={[0.66, 40, 24]} />;
-    case 'crystal': return <octahedronGeometry args={[0.72]} />;
-    default: return <boxGeometry args={[1, 1, 1]} />;
-  }
-}
+const MODEL_Y = 0.3;
 
 function Node({ node, selected, hovered, dimmed, onSelect, onHover }) {
   const group = useRef();
-  const body = useRef();
   const halo = useRef();
   const statusColor = STATUS[node.status]?.color ?? STATUS.gray.color;
   const baseColor = node.tint || LAYERS[node.layer]?.color || '#4f7cff';
   const inactive = node.status === 'gray';
   const running = node.status === 'blue';
   const phase = useMemo(() => (node.pos[0] * 0.37 + node.pos[2] * 0.21) % (Math.PI * 2), [node.pos]);
-  const rounded = ['screen', 'server', 'cube'].includes(node.shape);
-  const size = { screen: [1.7, 1.05, 0.14], server: [1.1, 1.5, 1.0], cube: [1.05, 1.05, 1.05] }[node.shape];
+  const kind = modelKind(node);
+  const m = useModelMaterials({ accent: baseColor, status: statusColor, dimmed, inactive, kind });
+  const anim = useMemo(() => ({ running, inactive, dimmed }), [running, inactive, dimmed]);
 
-  useFrame((state, dt) => {
+  useFrame((state) => {
     const t = state.clock.elapsedTime;
-    if (group.current) group.current.position.y = BODY_Y + Math.sin(t * 1.2 + phase) * (inactive ? 0.03 : 0.09);
-    if (body.current) {
-      if (SPINNING.has(node.shape) && !inactive) body.current.rotation.y += dt * (running ? 1.4 : 0.35);
-      if (node.shape === 'ring' && !inactive) body.current.rotation.x = Math.PI / 2 + Math.sin(t) * 0.2;
-      const target = hovered || selected ? 1.14 : 1;
-      body.current.scale.setScalar(THREE.MathUtils.lerp(body.current.scale.x, target, 0.15));
+    if (group.current) {
+      group.current.position.y = MODEL_Y + (inactive ? 0 : 0.05 + Math.sin(t * 1.2 + phase) * 0.05);
+      const target = hovered || selected ? 1.1 : 1;
+      group.current.scale.setScalar(THREE.MathUtils.lerp(group.current.scale.x, target, 0.15));
     }
     if (halo.current) {
-      const pulse = running || node.status === 'yellow' ? 1 + Math.sin(t * 4) * 0.12 : 1;
+      const pulse = running || node.status === 'yellow' ? 1 + Math.sin(t * 4) * 0.06 : 1;
       halo.current.scale.set(pulse, pulse, pulse);
     }
   });
@@ -84,44 +68,38 @@ function Node({ node, selected, hovered, dimmed, onSelect, onHover }) {
     onPointerOver: (e) => { e.stopPropagation(); onHover(node.id); document.body.style.cursor = 'pointer'; },
     onPointerOut: () => { onHover(null); document.body.style.cursor = ''; }
   };
-  const mat = (
-    <meshPhysicalMaterial
-      color={baseColor} emissive={baseColor}
-      emissiveIntensity={selected ? 0.55 : hovered ? 0.5 : inactive ? 0.05 : 0.28}
-      metalness={0.25} roughness={0.28} clearcoat={1} clearcoatRoughness={0.2}
-      transparent opacity={dimmed ? 0.15 : inactive ? 0.5 : 0.96}
-    />
-  );
 
   return (
     <group position={[node.pos[0], 0, node.pos[2]]}>
-      {/* pedestal */}
-      <mesh position={[0, 0.12, 0]} {...handlers}>
-        <cylinderGeometry args={[1.05, 1.2, 0.24, 6]} />
-        <meshStandardMaterial color="#111b31" metalness={0.7} roughness={0.35} transparent opacity={dimmed ? 0.25 : 1} />
+      {/* pedestal: brushed-metal plinth with a lit status ring */}
+      <mesh position={[0, 0.11, 0]} material={m.dark}><cylinderGeometry args={[1.02, 1.12, 0.22, 56]} /></mesh>
+      <mesh position={[0, 0.222, 0]} rotation={[-Math.PI / 2, 0, 0]} material={m.chassis}><circleGeometry args={[0.98, 56]} /></mesh>
+      <mesh ref={halo} position={[0, 0.226, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.86, 0.96, 56]} />
+        <meshBasicMaterial color={statusColor} transparent opacity={dimmed ? 0.1 : inactive ? 0.45 : 0.95} side={THREE.DoubleSide} toneMapped={false} />
       </mesh>
-      <mesh ref={halo} position={[0, 0.25, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.92, 1.08, 6]} />
-        <meshBasicMaterial color={statusColor} transparent opacity={dimmed ? 0.12 : 0.95} side={THREE.DoubleSide} toneMapped={false} />
+      <mesh position={[0, 0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[1.06, 0.018, 8, 72]} />
+        <meshBasicMaterial color={statusColor} transparent opacity={dimmed ? 0.08 : inactive ? 0.25 : 0.8} toneMapped={false} />
       </mesh>
-      {!dimmed && <Glow color={statusColor} scale={running ? 3.2 : 2.4} opacity={inactive ? 0.08 : running ? 0.4 : 0.22} position={[0, 0.35, 0]} />}
+      <mesh position={[0, 0.228, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[1.7, 1.7]} />
+        <meshBasicMaterial map={shadowTexture()} transparent opacity={dimmed ? 0.1 : 0.6} depthWrite={false} />
+      </mesh>
+      {!dimmed && <Glow color={statusColor} scale={running ? 3.4 : 2.6} opacity={inactive ? 0.05 : running ? 0.4 : 0.16} position={[0, 0.3, 0]} />}
       {selected && (
-        <mesh position={[0, 0.26, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[1.25, 1.34, 48]} />
-          <meshBasicMaterial color="#ffffff" transparent opacity={0.85} side={THREE.DoubleSide} />
+        <mesh position={[0, 0.23, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[1.2, 1.28, 64]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={0.9} side={THREE.DoubleSide} toneMapped={false} />
         </mesh>
       )}
-      {/* body */}
-      <group ref={group} position={[0, BODY_Y, 0]}>
-        {rounded ? (
-          <RoundedBox ref={body} args={size} radius={node.shape === 'screen' ? 0.06 : 0.12} smoothness={3} {...handlers}>{mat}</RoundedBox>
-        ) : (
-          <mesh ref={body} rotation={node.shape === 'funnel' ? [Math.PI, 0, 0] : node.shape === 'ring' ? [Math.PI / 2, 0, 0] : [0, 0, 0]} {...handlers}>
-            <Geometry shape={node.shape} />
-            {mat}
-          </mesh>
-        )}
-        {!dimmed && !inactive && <Glow color={baseColor} scale={2.1} opacity={hovered || selected ? 0.4 : 0.18} />}
+      {/* invisible hit volume so thin model parts are still easy to click */}
+      <mesh position={[0, 0.9, 0]} {...handlers}>
+        <cylinderGeometry args={[1.1, 1.1, 1.9, 16]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} />
+      </mesh>
+      <group ref={group} position={[0, MODEL_Y, 0]}>
+        <NodeModel kind={kind} m={m} anim={anim} node={node} />
       </group>
     </group>
   );
@@ -401,13 +379,25 @@ function SceneContents({ nodes, edges, platform, selected, hovered, focus, onSel
 
   return (
     <>
-      <ambientLight intensity={0.45} />
-      <hemisphereLight args={['#8fb3ff', '#1a0f2e', 0.5]} />
-      <directionalLight position={[8, 16, 10]} intensity={1.2} />
-      <pointLight position={[-12, 6, -8]} intensity={40} color="#7c5cf6" distance={40} />
-      <pointLight position={[10, 5, 6]} intensity={30} color="#ff5a36" distance={30} />
+      <ambientLight intensity={0.35} />
+      <hemisphereLight args={['#b9ccff', '#1b1533', 0.55]} />
+      <directionalLight position={[8, 18, 12]} intensity={1.6} color="#fff6ea" />
+      <directionalLight position={[-12, 8, -6]} intensity={0.5} color="#8fb3ff" />
+      <pointLight position={[-12, 6, -8]} intensity={30} color="#7c5cf6" distance={40} />
+      <pointLight position={[10, 5, 6]} intensity={22} color="#ff7a45" distance={30} />
+      {/* studio environment (no network): gives metals and glass real reflections */}
+      <Environment resolution={256} frames={1}>
+        <Lightformer form="rect" intensity={2.4} color="#e6eeff" position={[0, 14, 0]} rotation-x={Math.PI / 2} scale={[40, 40, 1]} />
+        <Lightformer form="rect" intensity={1.6} color="#7f9dff" position={[-18, 5, 4]} rotation-y={Math.PI / 2} scale={[24, 6, 1]} />
+        <Lightformer form="rect" intensity={1.3} color="#ffb48a" position={[18, 5, -4]} rotation-y={-Math.PI / 2} scale={[24, 6, 1]} />
+        <Lightformer form="ring" intensity={2.2} color="#ffffff" position={[0, 7, 18]} scale={8} />
+      </Environment>
       <Stars />
-      <gridHelper args={[80, 80, '#1c2b4d', '#111a30']} position={[0, -0.25, 0]} />
+      <mesh position={[0, -0.27, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[160, 160]} />
+        <meshStandardMaterial color="#10203f" metalness={0.35} roughness={0.78} />
+      </mesh>
+      <gridHelper args={[80, 80, '#2a4478', '#182a4d']} position={[0, -0.25, 0]} />
       {showLanes && <Lanes bounds={[bounds.min.x, bounds.max.x]} />}
       {platform && <Platform node={platform} selected={selected === 'databricks'} dimmed={Boolean(connected) || (focus !== 'all' && focus === 'hot')} onSelect={onSelect} onHover={onHover} />}
 
@@ -463,7 +453,7 @@ const Scene3D = forwardRef(function Scene3D(props, ref) {
 
   const anchors = useMemo(() => {
     // Alternate neighbours are lifted in screen space so their labels never overlap.
-    const a = nodes.map((nd) => ({ id: nd.id, pos: [nd.pos[0], BODY_Y + 1.05, nd.pos[2]], dy: nd.lift ? -42 : 0 }));
+    const a = nodes.map((nd) => ({ id: nd.id, pos: [nd.pos[0], MODEL_Y + 0.12 + modelTop(modelKind(nd)), nd.pos[2]], dy: nd.lift ? -42 : -6 }));
     if (showLanes && !compact) {
       LANES.forEach((l) => a.push({ id: `lane:${l.id}`, pos: [l.tag.x, 0.3, l.z], align: l.tag.align, middle: true }));
     }
@@ -476,8 +466,8 @@ const Scene3D = forwardRef(function Scene3D(props, ref) {
     <div className={`arch3d-wrap ${compact ? 'compact' : ''}`}>
       <Canvas camera={{ position: [0, 20, 22], fov: 42 }} dpr={[1, 1.75]} gl={{ antialias: true, powerPreference: 'low-power' }}
         onPointerMissed={() => props.onSelect(null)}>
-        <color attach="background" args={['#070d1a']} />
-        <fog attach="fog" args={['#070d1a', 45, 110]} />
+        <color attach="background" args={['#0c1a36']} />
+        <fog attach="fog" args={['#0c1a36', 50, 120]} />
         <SceneContents {...props} focus={focus} hovered={hovered} onHover={setHovered} traces={traces} bounds={bounds}
           onTraceDone={(k) => setTraces((prev) => prev.filter((t) => t.key !== k))} />
         <OrbitControls ref={controls} enableDamping dampingFactor={0.08} minDistance={5} maxDistance={90} maxPolarAngle={Math.PI * 0.47} />
@@ -501,7 +491,7 @@ const Scene3D = forwardRef(function Scene3D(props, ref) {
           const open = hovered === nd.id || selected === nd.id;
           return (
             <div key={nd.id} ref={(el) => { labelEls.current[nd.id] = el; }}
-              className={`arch3d-label ${dim ? 'dim' : ''} ${selected === nd.id ? 'sel' : ''} ${compact ? 'sm' : ''}`}>
+              className={`arch3d-label ${nd.lift ? 'lift' : ''} ${dim ? 'dim' : ''} ${selected === nd.id ? 'sel' : ''} ${compact ? 'sm' : ''}`}>
               <div className="l-top">
                 {nd.step != null && <span className="step" style={{ background: LANES.find((l) => l.id === nd.lane)?.color }}>{nd.step}</span>}
                 <span className="dot" style={{ background: color }} /><span className="nm">{nd.label}</span>

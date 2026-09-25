@@ -28,10 +28,28 @@ export function PaymentJourney({ tx }) {
     { cls: tx.decision === 'BLOCK' ? 'bad' : tx.decision === 'REVIEW' ? 'warn' : tx.decision ? 'ok' : 'todo', t: `Decision: ${decided}`, d: { COMPLETED: 'money sent', CHALLENGED: 'waiting for you to confirm or report it', BLOCKED: 'no money left your account', FAILED: 'could not be completed', PENDING_RISK_CHECK: 'still being checked' }[tx.status] || tx.status },
     { cls: tx.lakeLandedAt ? 'ok' : 'todo', t: 'Added to our analytics data', d: tx.lakeLandedAt ? `anonymised copy stored ${new Date(tx.lakeLandedAt).toLocaleDateString()} — helps train better fraud models` : 'happens in the next data-pipeline batch' }
   ];
+  const decisionIco = tx.decision === 'BLOCK' ? '⛔' : tx.decision === 'REVIEW' ? '⚠️' : '✅';
   return (
-    <ol className="journey">
-      {steps.map((s) => <li key={s.t} className={s.cls}><div className="j-t">{s.t}</div><div className="j-d">{s.d}</div></li>)}
-    </ol>
+    <>
+      <PaymentPath steps={steps} icons={['📱', '📏', '🧠', decisionIco, '🌊']} labels={['You', 'Signals', 'Fraud check', 'Decision', 'Data lake']} />
+      <ol className="journey">
+        {steps.map((s) => <li key={s.t} className={s.cls}><div className="j-t">{s.t}</div><div className="j-d">{s.d}</div></li>)}
+      </ol>
+    </>
+  );
+}
+
+/** The same steps as a compact path: lit stops are done, the flowing link shows where the payment is now. */
+function PaymentPath({ steps, icons, labels }) {
+  return (
+    <div className="ppath" role="img" aria-label={`Payment path: ${steps.map((s, i) => `${labels[i]} ${s.cls === 'todo' ? 'pending' : 'done'}`).join(', ')}`}>
+      {steps.map((s, i) => (
+        <React.Fragment key={labels[i]}>
+          {i > 0 && <span className={`pp-link ${s.cls}`} />}
+          <div className={`pp-node ${s.cls}`}><span className="pp-ico">{icons[i]}</span><span className="pp-l">{labels[i]}</span></div>
+        </React.Fragment>
+      ))}
+    </div>
   );
 }
 

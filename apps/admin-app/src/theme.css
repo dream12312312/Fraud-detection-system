@@ -1,0 +1,123 @@
+/*
+ * Bright theme (default). Everything is scoped to :root[data-theme="light"],
+ * so the original dark theme still works unchanged when toggled.
+ * The sidebar and the 3D stages keep a deep-blue "display" look on purpose:
+ * glowing data flows only read well on a dark surface.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f6fc;
+  --bg-soft: #eaf0fa;
+  --card: #ffffff;
+  --card-2: #f6f8fd;
+  --border: #dde5f2;
+  --border-strong: #c9d5ea;
+  --text: #13213d;
+  --text-dim: #4d5d7c;
+  --text-faint: #7b8aa6;
+  --primary: #3b6cff;
+  --primary-hover: #2b5cf0;
+  --success: #0e9f6e;
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --warn: #c27c02;
+  --warn-bg: rgba(245, 158, 11, 0.14);
+  --danger: #e03e45;
+  --danger-bg: rgba(239, 68, 68, 0.11);
+  --info: #2a72e0;
+  --info-bg: rgba(59, 130, 246, 0.11);
+  --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 8px 24px rgba(31, 56, 112, .08);
+  --card-grad: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  --primary-grad: linear-gradient(135deg, #3b6cff 0%, #7c4dff 100%);
+}
+
+/* deep-blue islands: sidebar, 3D stages and their overlays keep the dark tokens */
+:root[data-theme="light"] :is(.side-nav, .arch-stage, .mini-stage, .mini-panel, .tour-card, .arch-panel, .tooltip .tip) {
+  --bg: #0b1220; --bg-soft: #101a2e; --card: #16213a; --card-2: #1b2a47; --border: #2a3a5c; --border-strong: #2f4670;
+  --text: #eef2f8; --text-dim: #a8b6cf; --text-faint: #7c8db0;
+  --success: #34d399; --warn: #fbbf24; --danger: #f87171; --info: #60a5fa;
+  --card-grad: linear-gradient(160deg, #16223d 0%, #131d34 55%, #101828 100%);
+  color: var(--text);
+}
+
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(1100px 520px at 88% -12%, rgba(124, 77, 255, .10), transparent 60%),
+    radial-gradient(900px 480px at 8% 0%, rgba(59, 108, 255, .10), transparent 60%),
+    radial-gradient(800px 500px at 60% 110%, rgba(6, 182, 212, .08), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* chrome */
+:root[data-theme="light"] .topbar { background: rgba(255, 255, 255, .82); border-bottom: 1px solid var(--border); box-shadow: 0 1px 0 rgba(16, 24, 40, .03); }
+:root[data-theme="light"] .side-nav {
+  background: linear-gradient(185deg, #1a2a5e 0%, #16224a 45%, #111a38 100%);
+  border-right: none; box-shadow: 4px 0 24px rgba(20, 36, 90, .12);
+}
+:root[data-theme="light"] .side-nav .nav-label { color: #8da2d4; }
+:root[data-theme="light"] .side-nav .nav-item { color: #c8d3ee; }
+:root[data-theme="light"] .side-nav .nav-item:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+:root[data-theme="light"] .side-nav .nav-item.active { background: linear-gradient(135deg, rgba(90, 130, 255, .55), rgba(140, 90, 255, .45)); color: #fff; border-color: rgba(160, 185, 255, .5); box-shadow: 0 6px 18px rgba(20, 30, 90, .35); }
+:root[data-theme="light"] .side-user { background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .12); }
+
+/* surfaces */
+:root[data-theme="light"] .card { box-shadow: var(--shadow); border-color: var(--border); }
+:root[data-theme="light"] .kpi { background: #fff; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+:root[data-theme="light"] .kpi:hover { border-color: #b8c8ee; }
+:root[data-theme="light"] .hero {
+  background: linear-gradient(120deg, #eef3ff 0%, #f3edff 50%, #fff4f0 100%);
+  border: 1px solid #d6e0fb;
+}
+:root[data-theme="light"] input, :root[data-theme="light"] select, :root[data-theme="light"] textarea { background: #fff; color: var(--text); border-color: var(--border-strong); }
+:root[data-theme="light"] input:focus, :root[data-theme="light"] select:focus, :root[data-theme="light"] textarea:focus { box-shadow: 0 0 0 3px rgba(59, 108, 255, .16); }
+:root[data-theme="light"] button.btn.ghost { background: #fff; color: var(--text); border-color: var(--border-strong); }
+:root[data-theme="light"] button.btn.ghost:hover { background: #eef3ff; border-color: #b7c7f1; }
+:root[data-theme="light"] table.data tbody tr:hover { background: #f1f5ff; }
+:root[data-theme="light"] table.data tbody tr.sel { background: #e8efff; }
+:root[data-theme="light"] table.data tbody tr.journey-row td { background: #f7f9fe; }
+:root[data-theme="light"] :is(.notif.clickable, .todo, .job-run, .sl-item, .arch-conn):hover { background: #eef3ff; }
+:root[data-theme="light"] :is(.modal-overlay, .drawer-overlay, .nav-scrim) { background: rgba(15, 25, 50, .38); }
+:root[data-theme="light"] .temp-pwd-box { background: #f3f6fc; }
+:root[data-theme="light"] .auth-wrap { background: radial-gradient(1200px 600px at 50% -10%, #dfe8ff 0%, var(--bg) 60%); }
+
+/* text colours that were tuned for a dark background */
+:root[data-theme="light"] .flash.ok { color: #06603f; }
+:root[data-theme="light"] .flash.warn { color: #7a4d00; }
+:root[data-theme="light"] :is(.flash.error, .flash.fraud) { color: #8f1d22; }
+:root[data-theme="light"] .flash.info { color: #1b4d9c; }
+:root[data-theme="light"] .flash .x:hover { background: rgba(0, 0, 0, .06); }
+:root[data-theme="light"] .flash.floating { box-shadow: 0 10px 30px rgba(31, 56, 112, .18); background-color: #fff; }
+:root[data-theme="light"] .amount.out { color: #d0343b; }
+:root[data-theme="light"] .badge.LOW { background: rgba(16, 185, 129, .12); color: #0e9f6e; }
+:root[data-theme="light"] :is(.badge.FAILED, .badge.DISABLED, .tag) { color: #5b6b87; }
+:root[data-theme="light"] .eyebrow { color: #3b6cff; }
+:root[data-theme="light"] :is(a.ext, .stage-link) { color: #2b5cf0; }
+:root[data-theme="light"] .stage-err { color: #c42b31; }
+:root[data-theme="light"] .layer-tag.bronze { color: #9a5a1c; }
+:root[data-theme="light"] .layer-tag.silver { color: #56657f; }
+:root[data-theme="light"] .layer-tag.gold { color: #9a7400; }
+:root[data-theme="light"] .layer-tag.ml { color: #6d3fd8; }
+:root[data-theme="light"] .seg { background: #eef2fa; }
+:root[data-theme="light"] .seg button.on { background: var(--primary-grad); color: #fff; box-shadow: 0 3px 10px rgba(59, 108, 255, .3); }
+:root[data-theme="light"] .seg-count { background: rgba(0, 0, 0, .06); }
+:root[data-theme="light"] .protect-step { background: #fff; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+:root[data-theme="light"] .journey li::after { border-color: #fff; }
+:root[data-theme="light"] .arch-stage { border-color: #c5d2ec; box-shadow: 0 12px 34px rgba(31, 56, 112, .16); }
+
+/* theme toggle */
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong); background: var(--card);
+  color: var(--text-dim); border-radius: 999px; padding: 5px 11px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.theme-toggle:hover { color: var(--text); border-color: var(--primary); }
+
+/* cards laid out side by side in a grid must line up (the stacked-card margin only applies to columns) */
+.grid > .card + .card { margin-top: 0; }
+:root[data-theme="light"] .side-nav button.btn.ghost { background: rgba(255, 255, 255, .08); color: #e6ecfa; border-color: rgba(255, 255, 255, .22); }
+:root[data-theme="light"] .side-nav button.btn.ghost:hover { background: rgba(255, 255, 255, .16); }
+
+@media (max-width: 600px) {
+  .theme-toggle .tt-l { display: none; }
+  .theme-toggle { padding: 5px 8px; }
+  .topbar-user > span:not(.status-dot):not(.live-pill) { display: none; }
+}

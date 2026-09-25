@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import { api, saveSession, clearSession, verifySession, setAccessToken, setSessionExpiredHandler, useNow } from './lib.js';
 import { PaymentJourney, ProtectionStrip } from './journey.jsx';
 import { ShieldArt, PipelineArt } from './illustrations.jsx';
+import { ThemeToggle } from './theme.jsx';
 // note: the component-local useFlashSafe below replaces lib.js's useFlash so the
 // flash timer is cancellable (avoids an older flash wiping a newer one)
 
@@ -380,6 +381,7 @@ function Shell({ user, onUser, onLogout }) {
       <header className="topbar">
         <div className="topbar-brand"><span className="logo">🛡️</span> SentinelPay</div>
         <div className="topbar-user">
+          <ThemeToggle />
           <span className="status-dot ok" title="API connected" />
           <span>Signed in as <b>{user.fullName || user.email}</b></span>
           <button className="btn ghost sm" onClick={onLogout}>Sign out</button>
@@ -588,7 +590,7 @@ function TransferTab({ data, flashMsg, reload }) {
       } else if (res.status === 'BLOCKED') {
         flashMsg('fraud', 'This transaction was blocked because suspicious activity was detected.', 10000);
       } else if (res.status === 'COMPLETED') {
-        flashMsg('ok', `✅ Payment sent — ${money(res.amount || Number(form.amount))} · ${res.txId}.`);
+        flashMsg('ok', `Payment sent — ${money(res.amount || Number(form.amount))} · ${res.txId}.`);
       } else {
         flashMsg('info', `Payment ${res.txId} is ${res.status}.`);
       }

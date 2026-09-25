@@ -240,10 +240,12 @@ export function buildArchitecture({ system, pipeline, training, mlflow, stats, a
     {
       ...mlStage('evaluate', 'Evaluate vs Base', 'evaluate_register', 'orb', 'Stage 4: scores the held-out test set with the new model AND the live base model, then registers the version.',
         [['Last F1', fmtMetric(last?.metrics?.f1)], ['Last PR-AUC', fmtMetric(last?.metrics?.prAuc)], ['Base PR-AUC', fmtMetric(last?.baselineMetrics?.prAuc)]]),
-      value: last?.metrics?.f1 != null ? `F1 ${fmtMetric(last.metrics.f1)}` : null
+      value: last?.metrics?.f1 != null ? `F1 ${fmtMetric(last.metrics.f1)}` : null,
+      meter: last?.metrics?.rocAuc ?? null
     },
     {
       id: 'mlflow', label: 'MLflow', layer: 'ml', shape: 'orb',
+      bars: (mlflow?.runs || []).map((r) => r.metrics?.roc_auc).filter((v) => v != null).slice(0, 5).reverse(),
       status: !mlflow ? 'gray' : !mlflow.configured ? 'gray' : !exp ? 'gray' : mlflow.runs?.[0]?.status === 'RUNNING' ? 'blue' : 'green',
       statusLabel: !mlflow ? CHECKING : !exp ? 'NO EXPERIMENT YET' : `${mlflow.runs.length} runs tracked`,
       purpose: 'Databricks-hosted MLflow: parameters, metrics, base-model metrics and the model artifact of every run.',
@@ -251,7 +253,7 @@ export function buildArchitecture({ system, pipeline, training, mlflow, stats, a
       links: [host && exp && { label: 'Open experiment', url: `${host}/ml/experiments/${exp.id}` }].filter(Boolean)
     },
     {
-      id: 'registry', label: 'Model Registry', layer: 'ml', shape: 'crystal', status: versions.length ? 'green' : 'gray',
+      id: 'registry', label: 'Model Registry', layer: 'ml', shape: 'crystal', status: versions.length ? 'green' : 'gray', count: versions.length,
       statusLabel: !mlflow ? CHECKING : versions.length ? `v${versions[0].version} latest` : 'NO VERSIONS YET',
       value: versions.length ? `${versions.length} versions` : null,
       purpose: 'Unity Catalog registered model. Deploying a version to the fraud engine is a manual step (not automated yet).',
@@ -337,13 +339,13 @@ export function buildTrainingGraph({ run, options, mlflow, system, host }) {
       metrics: [['Features', o('build_features')?.feature_names?.join(', ') ?? '—'], ['Train / test', o('build_features') ? `${o('build_features').n_train} / ${o('build_features').n_test}` : '—'], ['Dropped rows', o('build_features')?.dropped_rows ?? '—']] },
     { id: 'train', label: modelLabel, layer: 'ml', shape: 'cube', status: tr.status, statusLabel: tr.label, value: o('train_model') ? `${o('train_model').train_seconds}s fit` : null,
       metrics: [['Model', modelLabel], ['Params', o('train_model')?.params ? Object.entries(o('train_model').params).map(([k, v]) => `${k}=${v}`).join(', ') : '—'], ['Train F1', fmtMetric(o('train_model')?.train_f1)]] },
-    { id: 'evaluate', label: 'Evaluate', layer: 'ml', shape: 'orb', status: ev.status, statusLabel: ev.label, value: run?.metrics?.f1 != null ? `F1 ${fmtMetric(run.metrics.f1)}` : null,
+    { id: 'evaluate', label: 'Evaluate', layer: 'ml', shape: 'orb', status: ev.status, statusLabel: ev.label, value: run?.metrics?.f1 != null ? `F1 ${fmtMetric(run.metrics.f1)}` : null, meter: run?.metrics?.rocAuc ?? null,
       metrics: [['Test F1', fmtMetric(run?.metrics?.f1)], ['PR-AUC', fmtMetric(run?.metrics?.prAuc)], ['ROC-AUC', fmtMetric(run?.metrics?.rocAuc)], ['Base PR-AUC', fmtMetric(run?.baselineMetrics?.prAuc)]] },
     { id: 'base', label: 'Base model (live)', layer: 'ml', shape: 'brain', status: system?.fraudEngine?.reachable ? 'green' : 'gray', statusLabel: 'rule-based heuristic',
       metrics: [['Role', 'scores live payments today; used as the comparison baseline'], ['Engine', system?.fraudEngine?.mode || '—']] },
-    { id: 'mlflow', label: 'MLflow', layer: 'ml', shape: 'orb', status: run?.mlflowRunId ? 'green' : tr.status === 'blue' ? 'blue' : 'gray', statusLabel: run?.mlflowRunId ? `run ${run.mlflowRunId.slice(0, 8)}` : 'waiting',
+    { id: 'mlflow', label: 'MLflow', layer: 'ml', shape: 'orb', bars: (mlflow?.runs || []).map((r) => r.metrics?.roc_auc).filter((v) => v != null).slice(0, 5).reverse(), status: run?.mlflowRunId ? 'green' : tr.status === 'blue' ? 'blue' : 'gray', statusLabel: run?.mlflowRunId ? `run ${run.mlflowRunId.slice(0, 8)}` : 'waiting',
       metrics: [['Experiment', mlflow?.experiment?.name || '—'], ['Run', run?.mlflowRunId || '—']] },
-    { id: 'registry', label: 'Registry', layer: 'ml', shape: 'crystal', status: run?.registeredVersion ? 'green' : ev.status === 'blue' ? 'blue' : ev.status === 'red' ? 'red' : 'gray',
+    { id: 'registry', label: 'Registry', layer: 'ml', shape: 'crystal', count: run?.registeredVersion ? 1 : 0, status: run?.registeredVersion ? 'green' : ev.status === 'blue' ? 'blue' : ev.status === 'red' ? 'red' : 'gray',
       statusLabel: run?.registeredVersion ? `v${run.registeredVersion}` : 'not registered', metrics: [['Model', run?.registeredModel || mlflow?.registeredModel || '—'], ['Version', run?.registeredVersion || '—']] }
   ].map((nd) => ({ ...nd, pos: pos[nd.id], lift: lift[nd.id] || 0, purpose: '', links: [] }));
 

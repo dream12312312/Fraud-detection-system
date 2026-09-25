@@ -68,3 +68,20 @@ table.data tbody tr.journey-row td { padding: 14px 18px 4px; background: rgba(11
 .review-row:last-child { border-bottom: none; }
 .review-row .k { color: var(--text-dim); }
 .review-row b { text-align: right; word-break: break-word; }
+
+/* payment path: the journey as a compact visual */
+.ppath { display: flex; align-items: flex-start; margin: 2px 0 16px; padding: 12px 10px 8px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--border); }
+.pp-node { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 56px; }
+.pp-ico { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-size: 17px; background: var(--card); border: 2px solid var(--border-strong); opacity: .5; }
+.pp-node.ok .pp-ico { border-color: var(--success); box-shadow: 0 0 0 4px var(--success-bg); opacity: 1; }
+.pp-node.warn .pp-ico { border-color: var(--warn); box-shadow: 0 0 0 4px var(--warn-bg); opacity: 1; }
+.pp-node.bad .pp-ico { border-color: var(--danger); box-shadow: 0 0 0 4px var(--danger-bg); opacity: 1; }
+.pp-l { font-size: 10.5px; font-weight: 700; color: var(--text-dim); text-align: center; line-height: 1.2; }
+.pp-link { flex: 1 1 auto; min-width: 8px; height: 3px; margin-top: 18px; border-radius: 3px; background: var(--border-strong); }
+.pp-link.ok { background: linear-gradient(90deg, var(--success) 0 40%, #7ee2bd 50%, var(--success) 60% 100%); background-size: 200% 100%; animation: ppFlow 1.6s linear infinite; }
+.pp-link.warn { background: var(--warn); }
+.pp-link.bad { background: var(--danger); }
+@keyframes ppFlow { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .pp-link.ok { animation: none; } }
+
+.grid > * { min-width: 0; }

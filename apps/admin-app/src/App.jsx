@@ -11,6 +11,7 @@ import TrainingPage from './pages/TrainingPage.jsx';
 import DatabricksPage from './pages/DatabricksPage.jsx';
 import SystemPage from './pages/SystemPage.jsx';
 import { ShieldArt } from './illustrations.jsx';
+import { ThemeToggle } from './theme.jsx';
 import './styles.css';
 import './console.css';
 
@@ -142,6 +143,7 @@ function Dashboard({ user, onLogout }) {
         <div className="crumb">{NAV.find((g) => g.items.includes(current))?.group} <span>›</span> <b>{current?.label}</b></div>
         <div className="topbar-user">
           <span className="live-pill" title="Live transaction stream (Socket.IO)"><span className="dot pulse" /> live</span>
+          <ThemeToggle />
           <span className="hide-sm">{user.email}</span>
           <button className="btn ghost sm" onClick={() => { setSession(null, null); onLogout(); }}>Sign out</button>
         </div>

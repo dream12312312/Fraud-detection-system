@@ -22,7 +22,7 @@ export default function OverviewPage({ go, liveFeed }) {
     { id: 'bronze', ico: '🥉', title: 'Bronze', value: int(mc.bronze_events), unit: 'raw events', tone: mc.bronze_events != null ? 'ok' : 'idle', note: 'Auto Loader ingest', go: 'pipeline' },
     { id: 'silver', ico: '🥈', title: 'Silver', value: int(mc.silver_events), unit: 'clean events', tone: mc.silver_events != null ? 'ok' : 'idle', note: `${int(mc.silver_quarantine)} quarantined`, go: 'pipeline' },
     { id: 'gold', ico: '🥇', title: 'Gold', value: int(mc.gold_fraud_predictions), unit: 'predictions', tone: mc.gold_fraud_predictions != null ? 'ok' : 'idle', note: `${int(mc.gold_user_behavior)} user profiles`, go: 'pipeline' },
-    { id: 'model', ico: '🧠', title: 'Model', value: cur?.modelType ? cur.modelType.replaceAll('_', ' ') : '—', unit: cur ? cur.status.toLowerCase() : 'never trained', tone: cur?.status === 'COMPLETED' ? 'ok' : cur?.status === 'FAILED' ? 'bad' : cur ? 'run' : 'idle', note: `live: ${fe?.mode === 'ML_MODEL' ? 'ML model' : fe?.reachable ? 'base model (rules)' : 'engine offline'}`, go: 'training' }
+    { id: 'model', ico: '🧠', title: 'Model', value: cur?.modelType ? cur.modelType.replaceAll('_', ' ') : '—', unit: !training ? 'loading…' : cur ? `${cur.status.toLowerCase()}${cur.dataset ? ` · ${cur.dataset.replaceAll('_', ' ')}` : ''}` : 'never trained', tone: cur?.status === 'COMPLETED' ? 'ok' : cur?.status === 'FAILED' ? 'bad' : cur ? 'run' : 'idle', note: `live: ${fe?.mode === 'ML_MODEL' ? 'ML model' : fe?.reachable ? 'base model (rules)' : 'engine offline'}`, go: 'training' }
   ];
 
   const todo = [
